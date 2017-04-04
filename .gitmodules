@@ -1,0 +1,3 @@
+[submodule "paramiko"]
+	path = paramiko
+	url = git@github.com:dimakogan/paramiko.git
