@@ -1,1 +1,1 @@
-# ssh
+[Protocol specification](protocol.md)
