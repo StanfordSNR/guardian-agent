@@ -19,8 +19,8 @@ him.
 
 Complying with the base protocol, all messages consist of length and contents.
 ```c
-	uint32                   message_length
-	byte[message_length]     message_contents
+    uint32                   message_length
+    byte[message_length]     message_contents
 ```
 The first byte of the contents always indicates the type of the message.
 
@@ -29,15 +29,15 @@ vendor-specific and experimental messages to be sent via the agent protocol.
 Therefore, all extension messages from the ***client*** and the ***server***
 consist of:
 ```c
-	byte                    SSH_AGENTC_EXTENSION
-	string                  extension_message_name
-	byte[]                  extension_message_contents
+    byte                    SSH_AGENTC_EXTENSION
+    string                  extension_message_name
+    byte[]                  extension_message_contents
 ```
 and
 ```c
-	byte                    SSH_AGENT_EXTENSION
-	string                  extension_message_name
-	byte[]                  extension_message_contents
+    byte                    SSH_AGENT_EXTENSION
+    string                  extension_message_name
+    byte[]                  extension_message_contents
 ```
 respectively, where ```SSH_AGENTC_EXTENSION``` is defined by the base protocol,
 and we define the ```SSH_AGENT_EXTENSION``` message number below.
@@ -47,8 +47,8 @@ and we define the ```SSH_AGENT_EXTENSION``` message number below.
 The ***client*** requests the ***agent*** to setup a new SSH connection with
 the ***server*** using the following  message:
 ```c
-	byte                    SSH_AGENTC_EXTENSION
-	string                  "delegated-connect@cs.stanford.edu"
+    byte                    SSH_AGENTC_EXTENSION
+    string                  "delegated-connect@cs.stanford.edu"
 ```
 
 The agent then tries to establish a new SSH connection to the server over
@@ -135,8 +135,8 @@ client:
     byte                    SSH_AGENT_EXTENSION
     string                  "handoff-connection@cs.stanford.edu"
     uint32                  outgoing_seq_num
-	uint32                  incoming_seq_num
-	uint32                  incoming_tcp_seq_num
+    uint32                  incoming_seq_num
+    uint32                  incoming_tcp_seq_num
 ```
 where ```outgoing_seq_num``` and ```incoming_seq_num``` are the next SSH
 sequence numbers, and ```incoming_seq_num``` is the sequence number of the
