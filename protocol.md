@@ -39,7 +39,8 @@ The first byte of the contents always indicates the type of the message.
 
 The agent protocol includes an optional extension mechanism that allows
 vendor-specific and experimental messages to be sent via the agent protocol.
-Therefore, all extension messages from the client and the server consist of:
+Therefore, all extension messages from the ***client*** and the ***server***
+consist of:
 ```c
 	byte                    SSH_AGENTC_EXTENSION
 	string                  extension_message_name
@@ -55,9 +56,10 @@ respectively, where ```SSH_AGENTC_EXTENSION``` is defined by the base protocol,
 and we define the ```SSH_AGENT_EXTENSION``` message number below.
 
 ## Starting a new delegated connection
-The client requests the agent to setup a new SSH connection with the server by
-first establishing a new TCP connection with the server, hereby referred to as
-the **server socket**, and then sending to the agent the following  message:
+The ***client*** requests the ***agent*** to setup a new SSH connection with
+the ***server*** by first establishing a new TCP connection with the ***server***,
+hereby referred to as the **server socket**, and then sending to the ***agent***
+the following  message:
 ```c
 	byte                    SSH_AGENTC_EXTENSION
 	string                  "delegated-connect@cs.stanford.edu"
@@ -155,24 +157,7 @@ Thereafter, the ***client*** MUST NOT send further ssh messages, but may
 receive messages from the server, forwarded by the agent.
 (See [SSH RFC Section 7.2](https://tools.ietf.org/html/rfc4253)).
 
-Note: The Server can start transmitting messages under the new key (that it
-shares with the client) as soon as it has sent its part of DH to the client.
-The client cannot tell that it has the key until the agent returns the decrypted
-DH message to it. There is a risk that the client will receive messages encrypted
-under the new key before it has formed said key.
-To deal with this issue, no change is required: the logic is as follows:
-1.Until the client has the new key, it should forward all messages to the Agent
-1.The agent should stop trying to decrypt messages once it has received the NEW
-KEYS message (it will have sent DH back to the client by then), and just forward
-them back to the client.
-
-There needs to be a mutual FIN between agent and client in order for them to
-close the connection, and send the NEW_KEYS message (encrypted under the old key)
-from the agent to the server.
-
-Note 2: avoid all this by doing full state transfer and not KRE?
-
-To complete the KRE, the ***client*** can request the connection parameters
+To complete the KRE, the ***client*** will request the connection parameters
 from the ***agent*** by sending the following message:
 ```c
     byte                    SSH_AGENTC_EXTENSION
@@ -187,4 +172,31 @@ On success, it will return the connection parameters:
     string                  sequence number
     string                  session id
 ```
+Otherwise, it can reply with an ```SSH_AGENT_FAILURE```.
+
+Once the agent has received the ```SSH_MSG_NEWKEYS``` message from the server, it can
+transfer the connection parameters to the client.
+By this point, subsequent messages sent by the server will all be encrypted
+under the new key, which only the client can decrypt. The agent need only send
+the ```SSH_MSG_NEWKEYS``` message to the server in turn (under the old key) and
+disconnect.
+
+Note: The Server can start transmitting messages under the new key (that it
+shares with the client) as soon as it has sent its part of DH to the client.
+The client cannot tell that it has the key until the agent returns the decrypted
+DH message to it. There is a risk that the client will receive messages encrypted
+under the new key before it has formed said key.
+To deal with this issue, no change is required: the logic is as follows:
+1.Until the client has the new key, it should forward all messages to the Agent
+1.The agent should stop trying to decrypt messages once it has received the ```SSH_MSG_NEWKEYS```
+message (it will have sent DH back to the client by then), and just forward
+them back to the client.
+
+There needs to be a mutual FIN between agent and client in order for them to
+close the connection, and send the ```SSH_MSG_NEWKEYS``` message (encrypted under
+the old key) from the agent to the server.
+
+Note 2: avoid all this by doing full state transfer and not KRE?
+
+
 
