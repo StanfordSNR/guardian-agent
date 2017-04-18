@@ -26,15 +26,15 @@ The agent protocol includes an optional extension mechanism that allows
 vendor-specific and experimental messages to be sent via the agent protocol.
 Therefore, all extension messages from the client and the server consist of:
 ```c
-    byte                    SSH_AGENTC_EXTENSION
-    string                  extension_message_name
-    byte[]                  extension_message_contents
+	byte                    SSH_AGENTC_EXTENSION
+	string                  extension_message_name
+	byte[]                  extension_message_contents
 ```
 and
 ```c
-    byte                    SSH_AGENT_EXTENSION
-    string                  extension_message_name
-    byte[]                  extension_message_contents
+	byte                    SSH_AGENT_EXTENSION
+	string                  extension_message_name
+	byte[]                  extension_message_contents
 ```
 respectively, where ```SSH_AGENTC_EXTENSION``` is defined by the base protocol,
 and we define the ```SSH_AGENT_EXTENSION``` message number below.
@@ -45,7 +45,7 @@ first establishing a new TCP connection with the server, hereby referred to as
 the **server socket**, and then sending to the agent the following  message:
 ```c
 	byte                    SSH_AGENTC_EXTENSION
-    string                  "delegated-connect@cs.stanford.edu"
+	string                  "delegated-connect@cs.stanford.edu"
 ```
 
 The agent then replies as following:
@@ -61,14 +61,14 @@ the agent by the client as follows. Upon receiving a packet from the server
 (on the server socket), the client sends the following message to the agent:
 ```c
 	byte                    SSH_AGENTC_EXTENSION
-    string                  "delegated-packet-from-server@cs.stanford.edu"
+    	string                  "delegated-packet-from-server@cs.stanford.edu"
 	byte[]                  original_packet
 ```
 To send a packet to the server, the agent sends to the client the following
 message:
 ```c
 	byte                    SSH_AGENT_EXTENSION
-    string                  "delegated-packet-to-server@cs.stanford.edu"
+	string                  "delegated-packet-to-server@cs.stanford.edu"
 	byte[]                  original_packet
 ```
 
@@ -95,19 +95,19 @@ agent to forward a SSH Connection Protocol Message to the server by
 encapsulating it in the following message, which is sent to the agent:
 ```c
 	byte                    SSH_AGENTC_EXTENSION
-    string                  "delegated-message-to-server@cs.stanford.edu"
-    string                  message
+	string                  "delegated-message-to-server@cs.stanford.edu"
+	string                  message
 ```
 It is up to the agent to determine whether to allow the given message to be
 forwarded to the server over the SSH connection. The agent sends messages
 from the server to the client by encapsulating them in the following message:
 ```c
 	byte                    SSH_AGENT_EXTENSION
-    string                  "delegated-message-from-server@cs.stanford.edu"
-    string                  message
+	string                  "delegated-message-from-server@cs.stanford.edu"
+	string                  message
 ```
 
-###Blocked Requests
+### Blocked Requests
 For simplicity, when the agent decides to block a message from being sent
 to the server (for example to prevent execution of a specific command),
 the agent returns the corresponding SSH Connection Protocol error message. For
