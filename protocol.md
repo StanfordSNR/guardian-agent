@@ -77,7 +77,7 @@ to the agent:
 ```c
     byte                    SSH_AGENTC_EXTENSION
     string                  "delegated-message-to-server@cs.stanford.edu"
-    string                  message
+    byte[]                  message
 ```
 It is up to the agent to determine whether to allow the given message to be
 forwarded to the server over the SSH connection. The agent sends messages
@@ -85,7 +85,7 @@ from the server to the client by encapsulating them in the following message:
 ```c
     byte                    SSH_AGENT_EXTENSION
     string                  "delegated-message-from-server@cs.stanford.edu"
-    string                  message
+    byte[]                  message
 ```
 
 ### Blocked Messages
@@ -128,23 +128,21 @@ from the server, before it responds with its ```SSH_MSG_KEXINIT``` message.
 
 The KRE is completed for each direction separately, when the sending party
 sends a ```SSH_MSG_NEWKEYS``` message.
-On the outbound direction, after sending this message the client stops forwarding
-its outgoing SSH messages to the agent, and instead sends them directly,
-encrypted with the new keys.
-
-On the inbound direction, this message
-is wrapped by the agent in the following message:
-
+Once the agent forwards both ```SSH_MSG_NEWKEYS``` messages (one at each
+direction), it completes the handoff by sending the following message to the
+client:
 ```c
     byte                    SSH_AGENT_EXTENSION
-    string                  "delegated-newkeys-from-server@cs.stanford.edu"
-    byte                    next_expected_byte
+    string                  "handoff-connection@cs.stanford.edu"
+    uint32                  outgoing_seq_num
+	uint32                  incoming_seq_num
+	uint32                  incoming_tcp_seq_num
 ```
-
-where ```next_expected_byte``` is the sequence number of the first byte
-on the inbound TCP connection that needs to be processed by the client (i.e.,
-the position in the TCP stream of the first SSH message encrypted with the
-new keys). This is required since the Server can start transmitting packets
+where ```outgoing_seq_num``` and ```incoming_seq_num``` are the next SSH
+sequence numbers, and ```incoming_seq_num``` is the sequence number of the
+first byte on the inbound TCP connection that needs to be processed by the
+client (i.e., the position in the TCP stream of the first SSH message encrypted
+with the new keys). This is required since the Server can start transmitting packets
 encrypted using the new key as soon as it has sent its ```SSH_MSG_NEWKEYS```
 message, and there is a risk that the client will receive messages encrypted
 under the new key before it has formed said key.
