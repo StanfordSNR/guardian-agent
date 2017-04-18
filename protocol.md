@@ -1,32 +1,19 @@
 # Session Delegation - SSH Agent Protocol Extension
 
-
 ## Overview
-This is a protocol extension to the [SSH Agent Protocol
-Draft](https://tools.ietf.org/id/draft-miller-ssh-agent-00.html).
+This is a protocol extension to the [SSH Agent
+Protocol](https://tools.ietf.org/id/draft-miller-ssh-agent-00.html).
 The goal of the extension is to allow an **SSH client**, running on a partially
 trusted machine, to request the **SSH agent**, running on a trusted machine,
-to establish an SSH session with an **SSH server**, such that the identity of
+to execute commands on an **SSH server**, such that the identity of
 the server as well as the SSH session command can be verified by the SSH agent.
 
-The following diagram illustrates the parties in the protocol, as well as the
-"network level" connectivity between them:
-![Before Handoff](Connectivity.png)
+![SSH Level](SSHLevel.png)
 
-## Protocol Timeline
-Through its use, the protocol (our agent layer) relies on three levels of abstraction:
-```c
-    Protocol    --- APPLY POLICY/HANDOFF --- AGENT LAYER
-                ---     FW MSG           --- SSH LAYER
-                ---     FW PKT           --- TCP LAYER
-```
+At some point the client can potentially request request tha connectionto be handed-off to
+him.
 
-The protocol works in three main stages:
-1.Establishing a connection A-S
-1.Delegating a restricted connection C-A-S
-1.Handing off the restricted connection C-S
-
-At all times, state changes are initiated by the Client.
+![After Handoff](AfterHandoff.png)
 
 ## Message Format
 
@@ -55,43 +42,20 @@ and
 respectively, where ```SSH_AGENTC_EXTENSION``` is defined by the base protocol,
 and we define the ```SSH_AGENT_EXTENSION``` message number below.
 
-## Starting a new delegated connection
+## Restricted delegated SSH Connection
+### Starting a new delegated connection
 The ***client*** requests the ***agent*** to setup a new SSH connection with
-the ***server*** by first establishing a new TCP connection with the ***server***,
-hereby referred to as the **server socket**, and then sending to the ***agent***
-the following  message:
+the ***server*** using the following  message:
 ```c
 	byte                    SSH_AGENTC_EXTENSION
 	string                  "delegated-connect@cs.stanford.edu"
 ```
 
-The agent then replies as following:
+The agent then tries to establish a new SSH connection to the server over
+the [forwarded TCP connection](#tcp-forwarding). The agent then sends to the
+client one of the following messages:
 1. If this extension is not supported by the agent, the agent replies with an
    empty ```SSH_AGENT_FAILURE``` message.
-1. If the request is denied, the agent replies with a
-   ```SSH_AGENT_EXTENSION_FAILURE``` message.
-1. If the request is approved, the agent replies with a
-   ```SSH_AGENT_EXTENSION_CONTINUE``` empty message.
-
-If the request is approved, the TCP connection to the server is forwarded to
-the agent by the client as follows. Upon receiving a packet from the server
-(on the server socket), the client sends the following message to the agent:
-```c
-    byte                    SSH_AGENTC_EXTENSION
-    string                  "delegated-packet-from-server@cs.stanford.edu"
-    byte[]                  original_packet
-```
-To send a packet to the server, the agent sends to the client the following
-message:
-```c
-    byte                    SSH_AGENT_EXTENSION
-    string                  "delegated-packet-to-server@cs.stanford.edu"
-    byte[]                  original_packet
-```
-
-The agent then tries to establish a new SSH connection to the server over
-the forwarded TCP connection. The agent then sends to the client one of the
-following messages:
 1. If the agent fails to establish the SSH connection (for example if it
    fails to authenticate the server, or fails to authenticate itself to the
    server etc.), it sends a ```SSH_AGENT_EXTENSION_FAILURE``` message.
@@ -102,13 +66,14 @@ following messages:
    forwarding packets between the server and the agent by processing the two
    types of messages above.
 
-## Restricted SSH Connection
+
+### SSH Message Forwarding
 Once a successfull SSH connection has been established between the agent
-and the server, the agent provides the client with a **restricted SSH
-Connection** to the server, by providing restricted forwarding of
-messages from the SSH Protocol. The client can request the
-agent to forward a SSH Connection Protocol Message to the server by
-encapsulating it in the following message, which is sent to the agent:
+and the server, the agent provides the client with a **restricted delegated SSH
+connection** to the server, by providing restricted forwarding of
+messages from the SSH Protocol. The client can request the agent to forward a
+SSH message to the server by encapsulating it in the following message and sending it
+to the agent:
 ```c
     byte                    SSH_AGENTC_EXTENSION
     string                  "delegated-message-to-server@cs.stanford.edu"
@@ -123,80 +88,100 @@ from the server to the client by encapsulating them in the following message:
     string                  message
 ```
 
-### Blocked Request
+### Blocked Messages
 For simplicity, when the agent decides to block a message from being sent
 to the server (for example to prevent execution of a specific command),
-the agent returns the corresponding SSH Connection Protocol error message. For
+the agent returns the corresponding SSH error message. For
 example:
 1. If the agent blocks a request to open channel (```SSH_MSG_CHANNEL_OPEN```),
 it sends the client a ```"delegated-message-from-server@cs.stanford.edu"```
 message containing an encapsulated ```SSH_MSG_CHANNEL_OPEN_FAILURE``` message.
 1. If the agent blocks a request to execute a command within a channel
-(```SSH_MSG_CHANNEL_REQUEST```), it sends the client a
-```"delegated-message-from-server@cs.stanford.edu"``` message
+(```SSH_MSG_CHANNEL_REQUEST```), it sends the client
+a ```"delegated-message-from-server@cs.stanford.edu"``` message
 containing an encapsulated ```SSH_MSG_CHANNEL_FAILURE``` message.
 
-## Connection Handoff
+
+
+### Connection Handoff
 Once the client has received the ```SSH_AGENT_SUCCESS``` message, it can
 initiate a connection handoff. To do this, we leverage the fact that SSH
-allows a client to initiate a "Key Re-Exchange" at any time: in this case,
-our client asks the server to initiate a KRE, using the agent's existing
-connection with the server.
+allows a client to initiate a
+["Key Re-Exchange"](https://tools.ietf.org/html/rfc4253#section-9) at any time.
+In this case, our client initiates a KRE over the agent's existing connection
+with the server, by using the
+[restricted SSH forwarding methods](#ssh-message-forwarding).
 
 We choose to do this using a KRE as it simplifies the state the agent must
 hand off to the client.
 Simply said, we are choosing to have the client negotiate the new connection
 with the server, rather than have the agent transfer its existing cryptographic
 state to the client, as this approach might be problematic if client and agent
-do not support the same cipher suites, for instance. We can do this using our
-Connection Service primitives defined above.
+do not support the same cipher suites, for instance.
 
-The KRE is performed by the client using the above mentioned ***Restricted SSH
-Connection*** using SSH_MSG_KEXINIT to freeze the connection state.
-Thereafter, the ***client*** MUST NOT send further ssh messages, but may
-receive messages from the server, forwarded by the agent.
-(See [SSH RFC Section 7.2](https://tools.ietf.org/html/rfc4253)).
+The KRE is initiated by the client sending a ```SSH_MSG_KEXINIT``` message.
+Note that in accordance with the SSH protocol, the client is
+[restricted](https://tools.ietf.org/html/rfc4253#page-19) to the
+types of messages it is allowed to send during key exchange (and effectively
+the connection is 'frozen'). However, additional messages might be received
+from the server, before it responds with its ```SSH_MSG_KEXINIT``` message.
 
-To complete the KRE, the ***client*** will request the connection parameters
-from the ***agent*** by sending the following message:
+The KRE is completed for each direction separately, when the sending party
+sends a ```SSH_MSG_NEWKEYS``` message.
+On the outbound direction, after sending this message the client stops forwarding
+its outgoing SSH messages to the agent, and instead sends them directly,
+encrypted with the new keys.
+
+On the inbound direction, this message
+is wrapped by the agent in the following message:
+
 ```c
-    byte                    SSH_AGENTC_EXTENSION
-    string                  "delegated-connection-params-request@cs.stanford.edu"
+    byte                    SSH_AGENT_EXTENSION
+    string                  "delegated-newkeys-from-server@cs.stanford.edu"
+    byte                    next_expected_byte
 ```
 
-It is up to the agent to determine whether this operation is allowed.
-On success, it will return the connection parameters:
-```c
-    byte                    SSH_AGENT_SUCCESS
-    string                  "delegated-connection-params-respo
-    string                  sequence number
-    string                  session id
-```
-Otherwise, it can reply with an ```SSH_AGENT_FAILURE```.
-
-Once the agent has received the ```SSH_MSG_NEWKEYS``` message from the server, it can
-transfer the connection parameters to the client.
-By this point, subsequent messages sent by the server will all be encrypted
-under the new key, which only the client can decrypt. The agent need only send
-the ```SSH_MSG_NEWKEYS``` message to the server in turn (under the old key) and
-disconnect.
-
-Note: The Server can start transmitting messages under the new key (that it
-shares with the client) as soon as it has sent its part of DH to the client.
-The client cannot tell that it has the key until the agent returns the decrypted
-DH message to it. There is a risk that the client will receive messages encrypted
+where ```next_expected_byte``` is the sequence number of the first byte
+on the inbound TCP connection that needs to be processed by the client (i.e.,
+the position in the TCP stream of the first SSH message encrypted with the
+new keys). This is required since the Server can start transmitting packets
+encrypted using the new key as soon as it has sent its ```SSH_MSG_NEWKEYS```
+message, and there is a risk that the client will receive messages encrypted
 under the new key before it has formed said key.
-To deal with this issue, no change is required: the logic is as follows:
-1.Until the client has the new key, it should forward all messages to the Agent
-1.The agent should stop trying to decrypt messages once it has received the ```SSH_MSG_NEWKEYS```
-message (it will have sent DH back to the client by then), and just forward
-them back to the client.
 
 There needs to be a mutual FIN between agent and client in order for them to
 close the connection, and send the ```SSH_MSG_NEWKEYS``` message (encrypted under
 the old key) from the agent to the server.
 
-Note 2: avoid all this by doing full state transfer and not KRE?
 
+## TCP Forwarding
+To make the handoff of the SSH connection transparent to the server, the
+SSH connection must remain on the same TCP connection both before and after the
+handoff. Since one of the motivations for the protocol is to allow the command data
+to be sent directly from the client to the server (rather than
+proxied through a potentillay slower link throght the agent), the TCP connection
+must be directly from the client to the server.
+Also note, that the server can be even unreachable from the agent
+on the network level (for example if the server is on some internal network,
+and the client is a DMZ host on the same network).
+The TCP connection to the server is thus forwarded to the agent by the client
+as follows.
 
+![Before Handoff](Connectivity.png)
 
+Upon receiving a packet from the server, the client sends the
+following message to the agent:
+```c
+    byte                    SSH_AGENTC_EXTENSION
+    string                  "delegated-packet-from-server@cs.stanford.edu"
+    byte[]                  original_packet
+```
+To send a packet to the server, the agent sends to the client the following
+message:
+```c
+    byte                    SSH_AGENT_EXTENSION
+    string                  "delegated-packet-to-server@cs.stanford.edu"
+    byte[]                  original_packet
+```
+
+Messages are not acked.
