@@ -1,4 +1,4 @@
-# Session Delegation - SSH Agent Protocol Extension
+# Restricted SSH Delegation and Handoff
 
 ## Overview
 This is a protocol extension to the [SSH Agent
