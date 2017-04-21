@@ -1,1 +1,1 @@
-[Protocol specification](protocol.md)
+[Protocol specification](doc/protocol.md)
