@@ -1,2 +1,5 @@
 *.swp
 *.gitmodules
+/gossh/agent/agent
+/gossh/agent/agent.exe
+*.go~
