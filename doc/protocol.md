@@ -193,30 +193,31 @@ Messages are not acked.
 Having described the various portions of the protocol in some detail, we shall describe
 the chronology of the events.
 
-1. The client initiates the process by providing the agent with a [valid packet](#message-format)
-whose contents contain the command.
+1. Restricted Connection Initialization
+  1. The client initiates the process by providing the agent with a [valid packet](#message-format)
+  whose contents contain the command.
+    *This is a potential exit path, if the agent does not support the extension.
 
-This is a potential exit path, if the agent does not support the extension.
+  1. The command is parsed by the agent, yielding the wanted command, server,
+  and identity of the client making the request and [verifying their validity](#blocked-messages).
+    *This is a potential exit path, if the agent denies this client opening
+    this channel with the server.
+    *This is a potential exit path, if the agent denies this client running
+    this particular command on this server.
 
-1. The command is parsed by the agent, yielding the wanted command, server,
-and identity of the client making the request and [verifying their validity](#blocked-messages).
+  1. The agent establishes an SSH connection with the server, through a [forwarded
+  TCP connection](#tcp-forwarding) using the client.
+    *This is a potential exit path if the agent fails to establish an authenticated
+    connection with the server.
 
-This is a potential exit path, if the agent denies this client opening
-this channel with the server.
-This is a potential exit path, if the agent denies this client running
-this particular command on this server.
+  1. The agent confirms that a connection has been made to the client.
 
-1. The agent establishes an SSH connection with the server, through a [forwarded
-TCP connection](#tcp-forwarding) using the client.
+1. Connection Handoff
+  1. The client may request a handoff initiating the KEX, [through the agent](#ssh-message-forwarding).
 
-This is a potential exit path if the agent fails to establish an authenticated
-connection with the server.
+  1. On KEX completion, the agent and client close their connection, with the
+  agent acknowledging the new keys with the server.
 
-1. The agent confirms that a connection has been made to the client.
+1. Task resumption
 
-1. The client may request a handoff initiating the KEX, [through the agent](#ssh-message-forwarding).
-
-1. On KEX completion, the agent and client close their connection, with the
-agent acknowledging the new keys with the server.
-
-1. The connection is now between server and client.
+  1. The connection is now between server and client.
