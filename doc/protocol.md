@@ -199,22 +199,22 @@ whose contents contain the command.
 This is a potential exit path, if the agent does not support the extension.
 
 1. The command is parsed by the agent, yielding the wanted command, server,
-and identity of the client making the request.
+and identity of the client making the request and [verifying their validity](#blocked-messages).
 
 This is a potential exit path, if the agent denies this client opening
 this channel with the server.
 This is a potential exit path, if the agent denies this client running
 this particular command on this server.
 
-1. The agent establishes an SSH connection with the server, through a forwarded
-TCP connection using the client.
+1. The agent establishes an SSH connection with the server, through a [forwarded
+TCP connection](#tcp-forwarding) using the client.
 
 This is a potential exit path if the agent fails to establish an authenticated
 connection with the server.
 
 1. The agent confirms that a connection has been made to the client.
 
-1. The client may request a handoff initiating the KEX.
+1. The client may request a handoff initiating the KEX, [through the agent](#ssh-message-forwarding).
 
 1. On KEX completion, the agent and client close their connection, with the
 agent acknowledging the new keys with the server.
