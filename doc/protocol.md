@@ -2,16 +2,17 @@
 
 ## Overview
 This is a protocol extension to the [SSH Agent
-Protocol](https://tools.ietf.org/id/draft-miller-ssh-agent-00.html).
+Protocol](https://tools.ietf.org/html/draft-ietf-secsh-agent-02).
 The goal of the extension is to allow an **SSH client**, running on a partially
 trusted machine, to request the **SSH agent**, running on a trusted machine,
 to execute commands on an **SSH server**, such that the identity of
-the server as well as the SSH session command can be verified by the SSH agent.
+the server as well as the SSH session command can be verified by the SSH agent,
+with the server's own code unaltered.
 
 ![SSH Level](SSHLevel.png)
 
-At some point the client can potentially request request tha connectionto be handed-off to
-him.
+At some point the client can choose to take over the connection by having the
+agent hand it off.
 
 ![After Handoff](AfterHandoff.png)
 
@@ -39,8 +40,8 @@ and
     string                  extension_message_name
     byte[]                  extension_message_contents
 ```
-respectively, where ```SSH_AGENTC_EXTENSION``` is defined by the base protocol,
-and we define the ```SSH_AGENT_EXTENSION``` message number below.
+respectively, where ```SSH_AGENT_EXTENSION``` is defined by the base protocol,
+and we define the ```SSH_AGENTC_EXTENSION``` message number below.
 
 ## Restricted delegated SSH Connection
 ### Starting a new delegated connection
@@ -71,9 +72,9 @@ client one of the following messages:
 Once a successfull SSH connection has been established between the agent
 and the server, the agent provides the client with a **restricted delegated SSH
 connection** to the server, by providing restricted forwarding of
-messages from the SSH Protocol. The client can request the agent to forward a
-SSH message to the server by encapsulating it in the following message and sending it
-to the agent:
+messages from the SSH Protocol. The client can request for the agent to forward
+an SSH message to the server by encapsulating it in the following message and
+sending it to the agent:
 ```c
     byte                    SSH_AGENTC_EXTENSION
     string                  "delegated-message-to-server@cs.stanford.edu"
@@ -155,13 +156,16 @@ the old key) from the agent to the server.
 ## TCP Forwarding
 To make the handoff of the SSH connection transparent to the server, the
 SSH connection must remain on the same TCP connection both before and after the
-handoff. Since one of the motivations for the protocol is to allow the command data
-to be sent directly from the client to the server (rather than
-proxied through a potentillay slower link throght the agent), the TCP connection
-must be directly from the client to the server.
-Also note, that the server can be even unreachable from the agent
-on the network level (for example if the server is on some internal network,
-and the client is a DMZ host on the same network).
+handoff.
+One of the motivations for the protocol is to allow the command data
+to be sent directly from the client to the server. For instance, the agent-server
+link may be potentially slower, or may even be inoperable (for example if the
+server is on some internal network, and the client is a DMZ host on the same
+network).
+The point is for the client-server connection to be made transparently, save
+for the matter of authentication and permission management that should be
+handled by the agent. Thus, the TCP connection must be formed directly 
+between the client and server.
 The TCP connection to the server is thus forwarded to the agent by the client
 as follows.
 
@@ -183,3 +187,38 @@ message:
 ```
 
 Messages are not acked.
+
+## Flow
+
+Having described the various portions of the protocol in some detail, we shall describe
+the chronology of the events.
+
+1. Restricted Connection Initialization
+    1. The client initiates the process by providing the agent with a [valid packet](#message-format)
+    whose contents contain the command.
+        * This is a potential exit path, if the agent does not support the extension.
+
+    1. The command is parsed by the agent, yielding the wanted command, server,
+    and identity of the client making the request and [verifying their validity](#blocked-messages).
+        * This is a potential exit path, if the agent denies this client opening
+        this channel with the server.
+        * This is a potential exit path, if the agent denies this client running
+        this particular command on this server.
+
+    1. The agent establishes an SSH connection with the server, through a [forwarded
+    TCP connection](#tcp-forwarding) using the client.
+        * This is a potential exit path if the agent fails to establish an authenticated
+        connection with the server.
+
+    1. The agent confirms that a connection has been made to the client.
+
+1. Connection Handoff
+    
+    1. The client may request a handoff initiating the KEX, [through the agent](#ssh-message-forwarding).
+
+    1. On KEX completion, the agent and client close their connection, with the
+    agent acknowledging the new keys with the server.
+
+1. Task resumption
+
+    1. The connection is now between server and client.
