@@ -53,6 +53,7 @@ func resume_ssh(conn *ssh.Client) {
 }
 
 func main() {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	curuser, err := user.Current()
 	if err != nil {
 		log.Fatalf("Failed to get current user: %s", err)
@@ -80,7 +81,7 @@ func main() {
 		host = user_host[0]
 	}
 
-	fmt.Printf("Host: %s, Port: %d, User: %s\n", host, port, username)
+	log.Printf("Host: %s, Port: %d, User: %s\n", host, port, username)
 
 	addr := fmt.Sprintf("%s:%d", host, port)
 	rcon, err := net.Dial("tcp", addr)
@@ -106,9 +107,33 @@ func main() {
 		log.Printf("Failed to Accept connection: %s", err)
 	}
 	defer incon.Close()
-	fmt.Print("Got connection back from proxy")
+	log.Print("Got connection back from proxy\n")
 	go io.Copy(incon, rcon)
 	go io.Copy(rcon, incon)
+
+	log.Printf("Starting delegated client...")
+
+	addr = "127.0.0.1:222"
+	config := ssh.ClientConfig{
+		HostKeyCallback:          ssh.InsecureIgnoreHostKey(),
+		DeferHostKeyVerification: true,
+	}
+
+	c, chans, reqs, err := ssh.NewClientConn(outcon, addr, &config)
+	if err != nil {
+		log.Printf("Failed to create NewClientConn:%s", err)
+		return
+	}
+
+	log.Printf("Creating NewClienConn")
+
+	ssh_client := ssh.NewClient(c, chans, reqs)
+	if ssh_client == nil {
+		log.Printf("unable to connect to [%s]: %v", addr, err)
+	}
+
+	log.Printf("SSH Connected\n")
+	defer ssh_client.Close()
 
 	tmp := make([]byte, 256)
 	outcon.Read(tmp)
