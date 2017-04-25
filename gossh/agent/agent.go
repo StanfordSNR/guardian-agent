@@ -12,8 +12,14 @@ import (
 )
 
 func proxySsh(toClient net.Conn, toServer net.Conn) {
-	_, err := ssh.NewProxyConn(toClient, toServer)
-	fmt.Print(err)
+	proxy, err := ssh.NewProxyConn(toClient, toServer)
+	if err != nil {
+		fmt.Print(err)
+		return
+	}
+
+	var done <-chan error = proxy.Run()
+	err = <-done
 }
 
 func main() {
