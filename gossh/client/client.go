@@ -62,9 +62,11 @@ func main() {
 	var port int
 	flag.IntVar(&port, "p", 22, "Port to connect to on the remote host.")
 	var cport int
-	flag.IntVar(&cport, "c", 2345, "Port to connect to proxy.")
-	var lport int
-	flag.IntVar(&lport, "l", 6789, "Port to listen for tcp forwarding.")
+	flag.IntVar(&cport, "c", 2345, "Proxy control port to connect to.")
+	var dport int
+	flag.IntVar(&dport, "d", 3434, "Data port to connect to.")
+	var tport int
+	flag.IntVar(&tport, "t", 6789, "Transport port to listen to.")
 
 	flag.Parse()
 	if flag.NArg() < 1 {
@@ -84,32 +86,38 @@ func main() {
 	log.Printf("Host: %s, Port: %d, User: %s\n", host, port, username)
 
 	addr := fmt.Sprintf("%s:%d", host, port)
-	rcon, err := net.Dial("tcp", addr)
+	transportOut, err := net.Dial("tcp", addr)
 	if err != nil {
 		log.Printf("Failed to connect to %s:%d: %s", host, port, err)
 	}
-	defer rcon.Close()
+	defer transportOut.Close()
 
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", lport))
+	transportListener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", tport))
 	if err != nil {
-		log.Fatalf("Failed to Listen on port %d: %s", lport, err)
+		log.Fatalf("Failed to Listen on port %d: %s", tport, err)
 	}
-	defer ln.Close()
+	defer transportListener.Close()
 
-	outcon, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", cport))
+	control, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", cport))
 	if err != nil {
 		log.Printf("Failed to connect to proxy port %d: %s", cport, err)
 	}
-	defer outcon.Close()
+	defer control.Close()
 
-	incon, err := ln.Accept()
+	sshData, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", dport))
+	if err != nil {
+		log.Printf("Failed to connect to proxy data port %d: %s", dport, err)
+	}
+	defer sshData.Close()
+
+	transportIn, err := transportListener.Accept()
 	if err != nil {
 		log.Printf("Failed to Accept connection: %s", err)
 	}
-	defer incon.Close()
+	defer transportIn.Close()
 	log.Print("Got connection back from proxy\n")
-	go io.Copy(incon, rcon)
-	go io.Copy(rcon, incon)
+	go io.Copy(transportIn, transportOut)
+	go io.Copy(transportOut, transportIn)
 
 	log.Printf("Starting delegated client...")
 
@@ -119,7 +127,7 @@ func main() {
 		DeferHostKeyVerification: true,
 	}
 
-	c, chans, reqs, err := ssh.NewClientConn(outcon, addr, &config)
+	c, chans, reqs, err := ssh.NewClientConn(sshData, addr, &config)
 	if err != nil {
 		log.Printf("Failed to create NewClientConn:%s", err)
 		return
@@ -127,14 +135,14 @@ func main() {
 
 	log.Printf("Creating NewClienConn")
 
-	ssh_client := ssh.NewClient(c, chans, reqs)
-	if ssh_client == nil {
+	sshClient := ssh.NewClient(c, chans, reqs)
+	if sshClient == nil {
 		log.Printf("unable to connect to [%s]: %v", addr, err)
 	}
 
 	log.Printf("SSH Connected\n")
-	defer ssh_client.Close()
+	defer sshClient.Close()
 
 	tmp := make([]byte, 256)
-	outcon.Read(tmp)
+	control.Read(tmp)
 }
