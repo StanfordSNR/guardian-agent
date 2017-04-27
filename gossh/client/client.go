@@ -13,7 +13,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-func resume_ssh(conn *ssh.Client) {
+func resumeSsh(conn *ssh.Client) {
 	session, err := conn.NewSession()
 	if err != nil {
 		log.Fatalf("Failed to create session: %s", err)
@@ -143,6 +143,9 @@ func main() {
 	log.Printf("SSH Connected\n")
 	defer sshClient.Close()
 
+	sshClient.RequestKeyChange()
+
+	//resumeSsh(sshClient)
 	tmp := make([]byte, 256)
 	control.Read(tmp)
 }

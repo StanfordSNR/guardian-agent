@@ -40,6 +40,9 @@ func proxySsh(toClient net.Conn, toServer net.Conn, control net.Conn) {
 
 	var done <-chan error = proxy.Run()
 	err = <-done
+	if err != nil {
+		log.Fatalf("Got error from proxy: %s", err)
+	}
 }
 
 func main() {
