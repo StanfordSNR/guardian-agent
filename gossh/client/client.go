@@ -143,9 +143,9 @@ func main() {
 	log.Printf("SSH Connected\n")
 	defer sshClient.Close()
 
-	sshClient.RequestKeyChange()
+	//	sshClient.RequestKeyChange()
 
-	//resumeSsh(sshClient)
+	resumeSsh(sshClient)
 	tmp := make([]byte, 256)
 	control.Read(tmp)
 }

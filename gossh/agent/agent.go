@@ -37,6 +37,11 @@ func proxySsh(toClient net.Conn, toServer net.Conn, control net.Conn) {
 		fmt.Print(err)
 		return
 	}
+	err = proxy.UpdateClientSessionParams()
+	if err != nil {
+		fmt.Print(err)
+		return
+	}
 
 	var done <-chan error = proxy.Run()
 	err = <-done
