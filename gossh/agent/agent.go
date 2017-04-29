@@ -13,7 +13,7 @@ import (
 	"golang.org/x/crypto/ssh/agent"
 )
 
-func proxySsh(toClient net.Conn, toServer net.Conn, control net.Conn) {
+func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn) {
 	var auths []ssh.AuthMethod
 	if aconn, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK")); err == nil {
 		auths = append(auths, ssh.PublicKeysCallback(agent.NewClient(aconn).Signers))
@@ -65,8 +65,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to get current user: %s", err)
 	}
-	var known_hosts string
-	flag.StringVar(&known_hosts, "known_hosts", filepath.Join(curuser.HomeDir, ".ssh/known_hosts"), "known hosts to verify against")
+	var knownHosts string
+	flag.StringVar(&knownHosts, "known_hosts", filepath.Join(curuser.HomeDir, ".ssh/known_hosts"), "known hosts to verify against")
 
 	flag.Parse()
 
@@ -104,6 +104,6 @@ func main() {
 		defer transport.Close()
 		log.Print("Connected to transport forwarding")
 
-		proxySsh(sshData, transport, control)
+		proxySSH(sshData, transport, control)
 	}
 }
