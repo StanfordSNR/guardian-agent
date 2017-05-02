@@ -43,7 +43,7 @@ func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn) {
 		return
 	}
 
-	var done <-chan error = proxy.Run()
+	done := proxy.Run()
 	err = <-done
 	if err != nil {
 		log.Fatalf("Got error from proxy: %s", err)
@@ -105,5 +105,9 @@ func main() {
 		log.Print("Connected to transport forwarding")
 
 		proxySSH(sshData, transport, control)
+		log.Print("Finished Proxy session")
+		control.Close()
+		sshData.Close()
+		transport.Close()
 	}
 }
