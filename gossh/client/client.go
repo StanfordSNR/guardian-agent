@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -10,10 +11,12 @@ import (
 	"os/user"
 	"strings"
 
+	"sync"
+
 	"golang.org/x/crypto/ssh"
 )
 
-func resumeSsh(conn *ssh.Client) {
+func resumeSSH(conn *ssh.Client) {
 	session, err := conn.NewSession()
 	if err != nil {
 		log.Fatalf("Failed to create session: %s", err)
@@ -52,6 +55,21 @@ func resumeSsh(conn *ssh.Client) {
 
 }
 
+type settableWriter struct {
+	w  io.Writer
+	mu sync.Mutex
+}
+
+func (sw *settableWriter) Write(p []byte) (n int, err error) {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+	if sw.w == nil {
+		return 0, errors.New("Writer is closed")
+	}
+
+	return sw.w.Write(p)
+}
+
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	curuser, err := user.Current()
@@ -73,24 +91,24 @@ func main() {
 		log.Fatalf("Usage: %s hostname", os.Args[0])
 	}
 
-	user_host := strings.Split(flag.Args()[0], "@")
+	userHost := strings.Split(flag.Args()[0], "@")
 	var username string
 	var host string
-	if len(user_host) > 1 {
-		username, host = user_host[0], user_host[1]
+	if len(userHost) > 1 {
+		username, host = userHost[0], userHost[1]
 	} else {
 		username = curuser.Username
-		host = user_host[0]
+		host = userHost[0]
 	}
 
 	log.Printf("Host: %s, Port: %d, User: %s\n", host, port, username)
 
 	addr := fmt.Sprintf("%s:%d", host, port)
-	transportOut, err := net.Dial("tcp", addr)
+	serverConn, err := net.Dial("tcp", addr)
 	if err != nil {
 		log.Printf("Failed to connect to %s:%d: %s", host, port, err)
 	}
-	defer transportOut.Close()
+	defer serverConn.Close()
 
 	transportListener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", tport))
 	if err != nil {
@@ -104,30 +122,93 @@ func main() {
 	}
 	defer control.Close()
 
-	sshData, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", dport))
+	proxyData, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", dport))
 	if err != nil {
 		log.Printf("Failed to connect to proxy data port %d: %s", dport, err)
 	}
-	defer sshData.Close()
+	defer proxyData.Close()
 
-	transportIn, err := transportListener.Accept()
+	proxyTransport, err := transportListener.Accept()
 	if err != nil {
 		log.Printf("Failed to Accept connection: %s", err)
 	}
-	defer transportIn.Close()
+	defer proxyTransport.Close()
 	log.Print("Got connection back from proxy\n")
-	go io.Copy(transportIn, transportOut)
-	go io.Copy(transportOut, transportIn)
 
 	log.Printf("Starting delegated client...")
 
+	sshClientConn, sshServerConn := net.Pipe()
+
+	// Initially, the SSH connection is wired to the proxy data,
+	// and the server connection is wired to the proxy transport.
+	sshOut := settableWriter{w: proxyData}
+	proxyOut := settableWriter{w: sshServerConn}
+	serverOut := settableWriter{w: proxyTransport}
+
+	go io.Copy(&sshOut, sshServerConn)
+	proxyDone := make(chan error)
+	go func() {
+		_, err := io.Copy(&proxyOut, proxyData)
+		log.Printf("Finsihed copying ssh data from proxy: %s", err)
+		proxyDone <- err
+	}()
+
+	go io.Copy(&serverOut, serverConn)
+	proxyTransportDone := make(chan error)
+	go func() {
+		_, err := io.Copy(serverConn, proxyTransport)
+		log.Printf("Finsihed copying transport data from proxy")
+		proxyTransportDone <- err
+	}()
+
+	doHandoffOnKex := make(chan chan error, 1)
+	kexCallback := func(err error) {
+		log.Printf("KexCallback called")
+		var done chan error
+		select {
+		case done = <-doHandoffOnKex:
+			break
+		default:
+			return
+		}
+
+		if err != nil {
+			done <- err
+			return
+		}
+
+		log.Printf("Starting transport rewiring")
+
+		if err = <-proxyTransportDone; err != nil {
+			done <- fmt.Errorf("Proxy transport forwarding failed: %s", err)
+			return
+		}
+		sshOut.mu.Lock()
+		sshOut.w = serverConn
+		sshOut.mu.Unlock()
+
+		if err = <-proxyDone; err != nil {
+			done <- fmt.Errorf("Proxy ssh data forwarding failed: %s", err)
+			return
+		}
+
+		serverOut.mu.Lock()
+		serverOut.w = sshServerConn
+		serverOut.mu.Unlock()
+
+		done <- nil
+	}
+
 	addr = "127.0.0.1:222"
 	config := ssh.ClientConfig{
+		Config: ssh.Config{
+			KexCallback: kexCallback,
+		},
 		HostKeyCallback:          ssh.InsecureIgnoreHostKey(),
 		DeferHostKeyVerification: true,
 	}
 
-	c, chans, reqs, err := ssh.NewClientConn(sshData, addr, &config)
+	c, chans, reqs, err := ssh.NewClientConn(sshClientConn, addr, &config)
 	if err != nil {
 		log.Printf("Failed to create NewClientConn:%s", err)
 		return
@@ -143,9 +224,19 @@ func main() {
 	log.Printf("SSH Connected\n")
 	defer sshClient.Close()
 
-	//	sshClient.RequestKeyChange()
+	handoffComplete := make(chan error, 1)
+	doHandoffOnKex <- handoffComplete
 
-	resumeSsh(sshClient)
+	log.Printf("Initiating Handoff Key Exchange")
+	sshClient.RequestKeyChange()
+
+	if err = <-handoffComplete; err != nil {
+		log.Printf("Handoff failed: %s", err)
+		return
+	}
+	log.Printf("Handoff Complete")
+
+	resumeSSH(sshClient)
 	tmp := make([]byte, 256)
 	control.Read(tmp)
 }
