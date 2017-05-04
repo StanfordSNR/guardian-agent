@@ -9,6 +9,7 @@ import (
 	"os/user"
 	"path/filepath"
 
+	"github.com/dimakogan/ssh/gossh/common"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 )
@@ -32,7 +33,8 @@ func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn) {
 		Auth:            auths,
 	}
 
-	proxy, err := ssh.NewProxyConn(toClient, toServer, clientConfig)
+	meteredConnToServer := common.MeteredConn{Conn: toServer}
+	proxy, err := ssh.NewProxyConn(toClient, &meteredConnToServer, clientConfig)
 	if err != nil {
 		fmt.Print(err)
 		return
@@ -48,6 +50,13 @@ func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn) {
 	if err != nil {
 		log.Fatalf("Got error from proxy: %s", err)
 	}
+
+	handshakeCompletedMsg := common.HandoffCompleteMessage{
+		MsgNum:            common.MsgHandoffComplete,
+		NextTransportByte: uint32(meteredConnToServer.BytesRead() - proxy.BufferedFromServer()),
+	}
+	packet := ssh.Marshal(handshakeCompletedMsg)
+	common.WriteControlPacket(control, packet)
 }
 
 func main() {
