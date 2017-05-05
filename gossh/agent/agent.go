@@ -9,6 +9,7 @@ import (
 	"os/user"
 	"path/filepath"
 
+	"github.com/dimakogan/ssh/gossh/common"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 )
@@ -19,12 +20,13 @@ func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn) {
 		auths = append(auths, ssh.PublicKeysCallback(agent.NewClient(aconn).Signers))
 	}
 
-	log.Printf("Conected to SSH_AUTH_SOCK")
+	log.Printf("Connected to SSH_AUTH_SOCK")
 
 	curuser, err := user.Current()
 	if err != nil {
 		log.Fatalf("Failed to get current user: %s", err)
 	}
+
 
 	clientConfig := &ssh.ClientConfig{
 		User:            curuser.Username,
@@ -32,7 +34,8 @@ func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn) {
 		Auth:            auths,
 	}
 
-	proxy, err := ssh.NewProxyConn(toClient, toServer, clientConfig)
+	meteredConnToServer := common.MeteredConn{Conn: toServer}
+	proxy, err := ssh.NewProxyConn(toClient, &meteredConnToServer, clientConfig)
 	if err != nil {
 		fmt.Print(err)
 		return
@@ -48,6 +51,13 @@ func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn) {
 	if err != nil {
 		log.Fatalf("Got error from proxy: %s", err)
 	}
+
+	handshakeCompletedMsg := common.HandoffCompleteMessage{
+		MsgNum:            common.MsgHandoffComplete,
+		NextTransportByte: uint32(meteredConnToServer.BytesRead() - proxy.BufferedFromServer()),
+	}
+	packet := ssh.Marshal(handshakeCompletedMsg)
+	common.WriteControlPacket(control, packet)
 }
 
 func main() {
@@ -61,6 +71,10 @@ func main() {
 	var tport int
 	flag.IntVar(&tport, "t", 6789, "Transport port to connect to.")
 
+	var pxAddr string
+	flag.StringVar(&pxAddr, "px", "127.0.0.1", "Address for the ssh proxy.")
+
+
 	curuser, err := user.Current()
 	if err != nil {
 		log.Fatalf("Failed to get current user: %s", err)
@@ -70,13 +84,13 @@ func main() {
 
 	flag.Parse()
 
-	controlListener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", cport))
+	controlListener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", pxAddr, cport))
 	if err != nil {
 		log.Fatalf("Failed to listen on control port %d: %s", cport, err)
 	}
 	defer controlListener.Close()
 
-	dataListener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", dport))
+	dataListener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", pxAddr, dport))
 	if err != nil {
 		log.Fatalf("Failed to listen on data port %d: %s", dport, err)
 	}
@@ -97,7 +111,7 @@ func main() {
 		defer sshData.Close()
 		log.Print("New incoming data connection")
 
-		transport, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", tport))
+		transport, err := net.Dial("tcp", fmt.Sprintf("%s:%d", pxAddr, tport))
 		if err != nil {
 			log.Printf("Failed to connect to local port %d: %s", tport, err)
 		}

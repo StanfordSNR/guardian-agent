@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"flag"
 	"fmt"
@@ -10,18 +11,18 @@ import (
 	"os"
 	"os/user"
 	"strings"
-
+	"time"
 	"sync"
 
+	"github.com/dimakogan/ssh/gossh/common"
 	"golang.org/x/crypto/ssh"
 )
 
-func resumeSSH(conn *ssh.Client) {
+func resumeSSH(conn *ssh.Client) (cmd string) <-chan error {
 	session, err := conn.NewSession()
 	if err != nil {
 		log.Fatalf("Failed to create session: %s", err)
 	}
-	defer session.Close()
 
 	stdin, err := session.StdinPipe()
 	if err != nil {
@@ -41,18 +42,12 @@ func resumeSSH(conn *ssh.Client) {
 	}
 	go io.Copy(os.Stderr, stderr)
 
-	var cmd string
-	if flag.NArg() < 2 {
-		cmd = "ls -la"
-	} else {
-		cmd = flag.Args()[1]
-	}
-
-	err = session.Run(cmd)
-	if err != nil {
-		log.Fatalf("Failed to run command: %s", err)
-	}
-
+	done := make(chan error)
+	go func() {
+		defer session.Close()
+		done <- session.Run(cmd)
+	}()
+	return done
 }
 
 type settableWriter struct {
@@ -85,6 +80,8 @@ func main() {
 	flag.IntVar(&dport, "d", 3434, "Data port to connect to.")
 	var tport int
 	flag.IntVar(&tport, "t", 6789, "Transport port to listen to.")
+	var pxAddr string
+	flag.StringVar(&pxAddr, "px", "127.0.0.1", "Address for the ssh proxy.")
 
 	flag.Parse()
 	if flag.NArg() < 1 {
@@ -101,6 +98,13 @@ func main() {
 		host = userHost[0]
 	}
 
+	var cmd string
+	if flag.NArg() < 2 {
+		cmd = "ls -la"
+	} else {
+		cmd = flag.Args()[1]
+	}
+
 	log.Printf("Host: %s, Port: %d, User: %s\n", host, port, username)
 
 	addr := fmt.Sprintf("%s:%d", host, port)
@@ -110,42 +114,43 @@ func main() {
 	}
 	defer serverConn.Close()
 
-	transportListener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", tport))
+	transportListener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", pxAddr, tport))
 	if err != nil {
 		log.Fatalf("Failed to Listen on port %d: %s", tport, err)
 	}
 	defer transportListener.Close()
 
-	control, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", cport))
+	control, err := net.Dial("tcp", fmt.Sprintf("%s:%d", pxAddr, cport))
 	if err != nil {
 		log.Printf("Failed to connect to proxy port %d: %s", cport, err)
 	}
 	defer control.Close()
 
-	proxyData, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", dport))
+	proxyData, err := net.Dial("tcp", fmt.Sprintf("%s:%d", pxAddr, dport))
 	if err != nil {
 		log.Printf("Failed to connect to proxy data port %d: %s", dport, err)
 	}
 	defer proxyData.Close()
 
-	proxyTransport, err := transportListener.Accept()
+	pt, err := transportListener.Accept()
 	if err != nil {
 		log.Printf("Failed to Accept connection: %s", err)
 	}
+	proxyTransport := common.MeteredConn{Conn: pt}
 	defer proxyTransport.Close()
 	log.Print("Got connection back from proxy\n")
 
 	log.Printf("Starting delegated client...")
 
-	sshClientConn, sshServerConn := net.Pipe()
+	sshClientConn, sshPipe := net.Pipe()
 
 	// Initially, the SSH connection is wired to the proxy data,
 	// and the server connection is wired to the proxy transport.
 	sshOut := settableWriter{w: proxyData}
-	proxyOut := settableWriter{w: sshServerConn}
-	serverOut := settableWriter{w: proxyTransport}
+	proxyOut := settableWriter{w: sshPipe}
+	serverOut := settableWriter{w: &proxyTransport}
 
-	go io.Copy(&sshOut, sshServerConn)
+	go io.Copy(&sshOut, sshPipe)
 	proxyDone := make(chan error)
 	go func() {
 		_, err := io.Copy(&proxyOut, proxyData)
@@ -156,12 +161,16 @@ func main() {
 	go io.Copy(&serverOut, serverConn)
 	proxyTransportDone := make(chan error)
 	go func() {
-		_, err := io.Copy(serverConn, proxyTransport)
+		_, err := io.Copy(serverConn, &proxyTransport)
 		log.Printf("Finsihed copying transport data from proxy")
 		proxyTransportDone <- err
 	}()
 
 	doHandoffOnKex := make(chan chan error, 1)
+	// To be used to buffer traffic that needs to be replayed to the client
+	// after the handoff (since the transport layer might deliver to the proxy
+	// packets that the server has sent after msgNewKeys).
+	bufferedTraffic := new(bytes.Buffer)
 	kexCallback := func(err error) {
 		log.Printf("KexCallback called")
 		var done chan error
@@ -192,11 +201,54 @@ func main() {
 			return
 		}
 
-		serverOut.mu.Lock()
-		serverOut.w = sshServerConn
-		serverOut.mu.Unlock()
+		handoffPacket, err := common.ReadControlPacket(control)
+		if handoffPacket[0] != common.MsgHandoffComplete {
+			done <- fmt.Errorf("Unexpected msg: %d, when expecting MsgHandshakeCompleted", handoffPacket[0])
+			return
+		}
+		handoffMsg := new(common.HandoffCompleteMessage)
+		if err = ssh.Unmarshal(handoffPacket, handoffMsg); err != nil {
+			done <- fmt.Errorf("Failed to unmarshal MsgHandshakeCompleted: %s", err)
+			return
+		}
 
-		done <- nil
+		log.Printf("Got handoffMsg.NextTransportByte: %d", handoffMsg.NextTransportByte)
+
+		time.Sleep(500 * time.Millisecond)
+		serverOut.mu.Lock()
+		serverOut.w = sshPipe
+
+		backfillLen := int(uint32(proxyTransport.BytesWritten()) - handoffMsg.NextTransportByte)
+		if backfillLen < 0 {
+			done <- fmt.Errorf(
+				"Unexpected negative backfill len, read from server: %d, reported by proxy: %d",
+				proxyTransport.BytesWritten(), handoffMsg.NextTransportByte)
+			serverOut.mu.Unlock()
+			return
+		}
+		if backfillLen == 0 {
+			log.Printf("No backfill necessary")
+			done <- nil
+			serverOut.mu.Unlock()
+			return
+		}
+		if bufferedTraffic.Len() < backfillLen {
+			done <- fmt.Errorf("Missing bytes to backfill, required: %d, available: %d", backfillLen, bufferedTraffic.Len())
+			serverOut.mu.Unlock()
+			return
+		}
+		bufferedTraffic.Next(bufferedTraffic.Len() - backfillLen)
+
+		//sshServerConn is unbuffered so we empty the buffer in a separate goroutine to avoid a deadlock
+		go func() {
+			defer serverOut.mu.Unlock()
+			n, err := bufferedTraffic.WriteTo(sshPipe)
+			if err != nil {
+				done <- fmt.Errorf("Failed to backfill traffic from server to client: %s", err)
+			}
+			log.Printf("Backfilled %d bytes from server to client", n)
+			done <- nil
+		}()
 	}
 
 	addr = "127.0.0.1:222"
@@ -224,10 +276,28 @@ func main() {
 	log.Printf("SSH Connected\n")
 	defer sshClient.Close()
 
+	controlFields := ControlFields{username, host, cmd}
+	controlFieldsPacket := ssh.Marshal(controlFields)
+	common.WriteControlPacket(proxyData, controlFieldsPacket)
+	log.Printf("Control Fields sent to proxy\n")
+
+	cmdDone := resumeSSH(sshClient, cmd)
+
+	// Uncomment this, together with running a long command (e.g., ping -c10 127.0.0.1),
+	// to trigger a backfill condition.
+	// time.Sleep(2 * time.Second)
 	handoffComplete := make(chan error, 1)
 	doHandoffOnKex <- handoffComplete
 
 	log.Printf("Initiating Handoff Key Exchange")
+
+	// First start buffering traffic from the server, since packets
+	// sent by ther server after msgNewKeys might need to replayed
+	// to the client after the handoff.
+	serverOut.mu.Lock()
+	serverOut.w = io.MultiWriter(serverOut.w, bufferedTraffic)
+	serverOut.mu.Unlock()
+
 	sshClient.RequestKeyChange()
 
 	if err = <-handoffComplete; err != nil {
@@ -236,7 +306,8 @@ func main() {
 	}
 	log.Printf("Handoff Complete")
 
-	resumeSSH(sshClient)
-	tmp := make([]byte, 256)
-	control.Read(tmp)
+	err = <-cmdDone
+	if err != nil {
+		log.Printf("Command failed: %s", err)
+	}
 }
