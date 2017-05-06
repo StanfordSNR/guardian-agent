@@ -10,11 +10,12 @@ import (
 	"path/filepath"
 
 	"github.com/dimakogan/ssh/gossh/common"
+	"github.com/dimakogan/ssh/gossh/policy"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 )
 
-func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn) {
+func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, pc policy.Policy) {
 	var auths []ssh.AuthMethod
 	if aconn, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK")); err == nil {
 		auths = append(auths, ssh.PublicKeysCallback(agent.NewClient(aconn).Signers))
@@ -35,7 +36,7 @@ func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn) {
 	}
 
 	meteredConnToServer := common.MeteredConn{Conn: toServer}
-	proxy, err := ssh.NewProxyConn(toClient, &meteredConnToServer, clientConfig)
+	proxy, err := ssh.NewProxyConn(toClient, &meteredConnToServer, clientConfig, pc)
 	if err != nil {
 		fmt.Print(err)
 		return
@@ -104,6 +105,23 @@ func main() {
 		defer control.Close()
 		log.Print("New incoming control connection")
 
+		policyControl := new(policy.Policy)
+		policyControlPacket, err := common.ReadControlPacket(control)
+		if err = ssh.Unmarshal(policyControlPacket, policyControl); err != nil {
+			log.Print("Failed to unmarshal policy control: %s", err)
+			return
+		}
+		log.Print("Incoming control field packet")
+
+		err = policyControl.ValidatePolicy()
+		if err != nil {
+			log.Printf("Policy error: %s", err)
+			// TODO(sternh): this shouldn't exit, but rather reply to client and proceed to next req
+			// send disconnect on ssh data channel, and a deny on control channel
+			// or defer?/handle incoming connection
+			continue
+		}
+
 		sshData, err := dataListener.Accept()
 		if err != nil {
 			log.Printf("Failed to accept data connection: %s", err)
@@ -118,7 +136,7 @@ func main() {
 		defer transport.Close()
 		log.Print("Connected to transport forwarding")
 
-		proxySSH(sshData, transport, control)
+		proxySSH(sshData, transport, control, *policyControl)
 		log.Print("Finished Proxy session")
 		control.Close()
 		sshData.Close()

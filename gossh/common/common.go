@@ -10,12 +10,6 @@ import (
 
 const MsgHandoffComplete = 10
 
-type ControlFields struct {
-    User    string
-    Command string
-    Server  string
-}
-
 type HandoffCompleteMessage struct {
 	MsgNum            byte
 	NextTransportByte uint32

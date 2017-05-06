@@ -15,10 +15,11 @@ import (
 	"sync"
 
 	"github.com/dimakogan/ssh/gossh/common"
+	"github.com/dimakogan/ssh/gossh/policy"
 	"golang.org/x/crypto/ssh"
 )
 
-func resumeSSH(conn *ssh.Client) (cmd string) <-chan error {
+func resumeSSH(conn *ssh.Client, cmd string) <-chan error {
 	session, err := conn.NewSession()
 	if err != nil {
 		log.Fatalf("Failed to create session: %s", err)
@@ -131,6 +132,11 @@ func main() {
 		log.Printf("Failed to connect to proxy data port %d: %s", dport, err)
 	}
 	defer proxyData.Close()
+
+	policy := policy.NewPolicy(username, host, cmd)
+	policyControlPacket := ssh.Marshal(policy)
+	common.WriteControlPacket(control, policyControlPacket)
+	log.Printf("Policy Control sent to proxy\n")
 
 	pt, err := transportListener.Accept()
 	if err != nil {
@@ -276,11 +282,6 @@ func main() {
 	log.Printf("SSH Connected\n")
 	defer sshClient.Close()
 
-	controlFields := ControlFields{username, host, cmd}
-	controlFieldsPacket := ssh.Marshal(controlFields)
-	common.WriteControlPacket(proxyData, controlFieldsPacket)
-	log.Printf("Control Fields sent to proxy\n")
-
 	cmdDone := resumeSSH(sshClient, cmd)
 
 	// Uncomment this, together with running a long command (e.g., ping -c10 127.0.0.1),
@@ -298,8 +299,13 @@ func main() {
 	serverOut.w = io.MultiWriter(serverOut.w, bufferedTraffic)
 	serverOut.mu.Unlock()
 
-	sshClient.RequestKeyChange()
+	// refactor. put in separate fn. The whole client deserves a refactor
+	// and use cv
+	for !sshClient.ChannelRequestSuccessful() {
+		// ergh
+	}
 
+	sshClient.RequestKeyChange()
 	if err = <-handoffComplete; err != nil {
 		log.Printf("Handoff failed: %s", err)
 		return
