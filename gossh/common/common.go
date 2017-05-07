@@ -8,7 +8,15 @@ import (
 	"net"
 )
 
+const MsgExecutionRequest = 1
 const MsgHandoffComplete = 10
+
+type ExecutionRequestMessage struct {
+	MsgNum  byte
+	User    string
+	Command string
+	Server  string
+}
 
 type HandoffCompleteMessage struct {
 	MsgNum            byte

@@ -14,13 +14,13 @@ import (
 	"golang.org/x/crypto/ssh/agent"
 )
 
-func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn) {
+func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, pc *ssh.Policy) {
 	var auths []ssh.AuthMethod
 	if aconn, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK")); err == nil {
 		auths = append(auths, ssh.PublicKeysCallback(agent.NewClient(aconn).Signers))
 	}
 
-	log.Printf("Conected to SSH_AUTH_SOCK")
+	log.Printf("Connected to SSH_AUTH_SOCK")
 
 	curuser, err := user.Current()
 	if err != nil {
@@ -34,7 +34,7 @@ func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn) {
 	}
 
 	meteredConnToServer := common.MeteredConn{Conn: toServer}
-	proxy, err := ssh.NewProxyConn(toClient, &meteredConnToServer, clientConfig)
+	proxy, err := ssh.NewProxyConn(toClient, &meteredConnToServer, clientConfig, pc.FilterPacket)
 	if err != nil {
 		fmt.Print(err)
 		return
@@ -70,6 +70,9 @@ func main() {
 	var tport int
 	flag.IntVar(&tport, "t", 6789, "Transport port to connect to.")
 
+	var pxAddr string
+	flag.StringVar(&pxAddr, "px", "127.0.0.1", "Address for the ssh proxy.")
+
 	curuser, err := user.Current()
 	if err != nil {
 		log.Fatalf("Failed to get current user: %s", err)
@@ -79,13 +82,13 @@ func main() {
 
 	flag.Parse()
 
-	controlListener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", cport))
+	controlListener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", pxAddr, cport))
 	if err != nil {
 		log.Fatalf("Failed to listen on control port %d: %s", cport, err)
 	}
 	defer controlListener.Close()
 
-	dataListener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", dport))
+	dataListener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", pxAddr, dport))
 	if err != nil {
 		log.Fatalf("Failed to listen on data port %d: %s", dport, err)
 	}
@@ -99,6 +102,28 @@ func main() {
 		defer control.Close()
 		log.Print("New incoming control connection")
 
+		controlPacket, err := common.ReadControlPacket(control)
+		if controlPacket[0] != common.MsgExecutionRequest {
+			log.Printf("Unexpected control message: %d (expecting MsgExecutionRequest)", controlPacket[0])
+			continue
+		}
+		execReq := new(common.ExecutionRequestMessage)
+		if err = ssh.Unmarshal(controlPacket, execReq); err != nil {
+			log.Print("Failed to unmarshal ExecutionRequestMessage: %s", err)
+			continue
+		}
+
+		policyControl := ssh.NewPolicy(execReq.User, execReq.Command, execReq.Server)
+
+		err = policyControl.AskForApproval()
+		if err != nil {
+			log.Printf("Policy error: %s", err)
+			// TODO(sternh): this shouldn't exit, but rather reply to client and proceed to next req
+			// send disconnect on ssh data channel, and a deny on control channel
+			// or defer?/handle incoming connection
+			continue
+		}
+
 		sshData, err := dataListener.Accept()
 		if err != nil {
 			log.Printf("Failed to accept data connection: %s", err)
@@ -106,14 +131,14 @@ func main() {
 		defer sshData.Close()
 		log.Print("New incoming data connection")
 
-		transport, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", tport))
+		transport, err := net.Dial("tcp", fmt.Sprintf("%s:%d", pxAddr, tport))
 		if err != nil {
 			log.Printf("Failed to connect to local port %d: %s", tport, err)
 		}
 		defer transport.Close()
 		log.Print("Connected to transport forwarding")
 
-		proxySSH(sshData, transport, control)
+		proxySSH(sshData, transport, control, policyControl)
 		log.Print("Finished Proxy session")
 		control.Close()
 		sshData.Close()

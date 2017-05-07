@@ -11,50 +11,59 @@ import (
 	"os"
 	"os/user"
 	"strings"
-	"time"
-
 	"sync"
+	"time"
 
 	"github.com/dimakogan/ssh/gossh/common"
 	"golang.org/x/crypto/ssh"
 )
 
-func resumeSSH(conn *ssh.Client) <-chan error {
-	session, err := conn.NewSession()
+type commandExecution struct {
+	session *ssh.Session
+	stdin   io.WriteCloser
+	stdout  io.Reader
+	stderr  io.Reader
+}
+
+func startCommand(conn *ssh.Client, cmd string) (cmdExec *commandExecution, err error) {
+	cmdExec = &commandExecution{}
+	// TODO(dimakogan): initial window size should be set to probably 0, to avoid large amounts
+	// of data to be transfered through proxy prior to handoff.
+	cmdExec.session, err = conn.NewSession()
 	if err != nil {
 		log.Fatalf("Failed to create session: %s", err)
 	}
 
-	stdin, err := session.StdinPipe()
+	cmdExec.stdin, err = cmdExec.session.StdinPipe()
 	if err != nil {
-		log.Fatalf("Unable to setup stdin for session: %v", err)
+		cmdExec.session.Close()
+		return nil, err
 	}
-	go io.Copy(stdin, os.Stdin)
-
-	stdout, err := session.StdoutPipe()
+	cmdExec.stdout, err = cmdExec.session.StdoutPipe()
 	if err != nil {
-		log.Fatalf("Unable to setup stdout for session: %v", err)
+		cmdExec.session.Close()
+		return nil, err
 	}
-	go io.Copy(os.Stdout, stdout)
 
-	stderr, err := session.StderrPipe()
+	cmdExec.stderr, err = cmdExec.session.StderrPipe()
 	if err != nil {
-		log.Fatalf("Unable to setup stderr for session: %v", err)
+		cmdExec.session.Close()
+		return nil, err
 	}
-	go io.Copy(os.Stderr, stderr)
 
-	var cmd string
-	if flag.NArg() < 2 {
-		cmd = "ls -la"
-	} else {
-		cmd = flag.Args()[1]
+	if err = cmdExec.session.Start(cmd); err != nil {
+		cmdExec.session.Close()
+		return nil, err
 	}
-	done := make(chan error)
-	go func() {
-		defer session.Close()
-		done <- session.Run(cmd)
-	}()
-	return done
+
+	return cmdExec, nil
+}
+
+func (cmdExec *commandExecution) resume() error {
+	go io.Copy(cmdExec.stdin, os.Stdin)
+	go io.Copy(os.Stdout, cmdExec.stdout)
+	go io.Copy(os.Stderr, cmdExec.stderr)
+	return cmdExec.session.Wait()
 }
 
 type settableWriter struct {
@@ -87,6 +96,8 @@ func main() {
 	flag.IntVar(&dport, "d", 3434, "Data port to connect to.")
 	var tport int
 	flag.IntVar(&tport, "t", 6789, "Transport port to listen to.")
+	var pxAddr string
+	flag.StringVar(&pxAddr, "px", "127.0.0.1", "Address for the ssh proxy.")
 
 	flag.Parse()
 	if flag.NArg() < 1 {
@@ -103,6 +114,13 @@ func main() {
 		host = userHost[0]
 	}
 
+	var cmd string
+	if flag.NArg() < 2 {
+		cmd = "ls -la"
+	} else {
+		cmd = flag.Args()[1]
+	}
+
 	log.Printf("Host: %s, Port: %d, User: %s\n", host, port, username)
 
 	addr := fmt.Sprintf("%s:%d", host, port)
@@ -112,23 +130,29 @@ func main() {
 	}
 	defer serverConn.Close()
 
-	transportListener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", tport))
+	transportListener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", pxAddr, tport))
 	if err != nil {
 		log.Fatalf("Failed to Listen on port %d: %s", tport, err)
 	}
 	defer transportListener.Close()
 
-	control, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", cport))
+	control, err := net.Dial("tcp", fmt.Sprintf("%s:%d", pxAddr, cport))
 	if err != nil {
 		log.Printf("Failed to connect to proxy port %d: %s", cport, err)
 	}
 	defer control.Close()
 
-	proxyData, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", dport))
+	proxyData, err := net.Dial("tcp", fmt.Sprintf("%s:%d", pxAddr, dport))
 	if err != nil {
 		log.Printf("Failed to connect to proxy data port %d: %s", dport, err)
 	}
 	defer proxyData.Close()
+
+	execReq := common.ExecutionRequestMessage{MsgNum: common.MsgExecutionRequest, User: username, Command: cmd, Server: host}
+
+	execReqPacket := ssh.Marshal(execReq)
+	common.WriteControlPacket(control, execReqPacket)
+	log.Printf("MsgExecutionRequest sent to proxy\n")
 
 	pt, err := transportListener.Accept()
 	if err != nil {
@@ -274,7 +298,11 @@ func main() {
 	log.Printf("SSH Connected\n")
 	defer sshClient.Close()
 
-	cmdDone := resumeSSH(sshClient)
+	session, err := startCommand(sshClient, cmd)
+	if err != nil {
+		log.Printf("Failed to run command: %s", err)
+		return
+	}
 
 	// Uncomment this, together with running a long command (e.g., ping -c10 127.0.0.1),
 	// to trigger a backfill condition.
@@ -292,14 +320,13 @@ func main() {
 	serverOut.mu.Unlock()
 
 	sshClient.RequestKeyChange()
-
 	if err = <-handoffComplete; err != nil {
 		log.Printf("Handoff failed: %s", err)
 		return
 	}
 	log.Printf("Handoff Complete")
 
-	err = <-cmdDone
+	err = session.resume()
 	if err != nil {
 		log.Printf("Command failed: %s", err)
 	}
