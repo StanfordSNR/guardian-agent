@@ -11,44 +11,59 @@ import (
 	"os"
 	"os/user"
 	"strings"
-	"time"
 	"sync"
+	"time"
 
 	"github.com/dimakogan/ssh/gossh/common"
-	"github.com/dimakogan/ssh/gossh/policy"
 	"golang.org/x/crypto/ssh"
 )
 
-func resumeSSH(conn *ssh.Client, cmd string) <-chan error {
-	session, err := conn.NewSession()
+type commandExecution struct {
+	session *ssh.Session
+	stdin   io.WriteCloser
+	stdout  io.Reader
+	stderr  io.Reader
+}
+
+func startCommand(conn *ssh.Client, cmd string) (cmdExec *commandExecution, err error) {
+	cmdExec = &commandExecution{}
+	// TODO(dimakogan): initial window size should be set to probably 0, to avoid large amounts
+	// of data to be transfered through proxy prior to handoff.
+	cmdExec.session, err = conn.NewSession()
 	if err != nil {
 		log.Fatalf("Failed to create session: %s", err)
 	}
 
-	stdin, err := session.StdinPipe()
+	cmdExec.stdin, err = cmdExec.session.StdinPipe()
 	if err != nil {
-		log.Fatalf("Unable to setup stdin for session: %v", err)
+		cmdExec.session.Close()
+		return nil, err
 	}
-	go io.Copy(stdin, os.Stdin)
-
-	stdout, err := session.StdoutPipe()
+	cmdExec.stdout, err = cmdExec.session.StdoutPipe()
 	if err != nil {
-		log.Fatalf("Unable to setup stdout for session: %v", err)
+		cmdExec.session.Close()
+		return nil, err
 	}
-	go io.Copy(os.Stdout, stdout)
 
-	stderr, err := session.StderrPipe()
+	cmdExec.stderr, err = cmdExec.session.StderrPipe()
 	if err != nil {
-		log.Fatalf("Unable to setup stderr for session: %v", err)
+		cmdExec.session.Close()
+		return nil, err
 	}
-	go io.Copy(os.Stderr, stderr)
 
-	done := make(chan error)
-	go func() {
-		defer session.Close()
-		done <- session.Run(cmd)
-	}()
-	return done
+	if err = cmdExec.session.Start(cmd); err != nil {
+		cmdExec.session.Close()
+		return nil, err
+	}
+
+	return cmdExec, nil
+}
+
+func (cmdExec *commandExecution) resume() error {
+	go io.Copy(cmdExec.stdin, os.Stdin)
+	go io.Copy(os.Stdout, cmdExec.stdout)
+	go io.Copy(os.Stderr, cmdExec.stderr)
+	return cmdExec.session.Wait()
 }
 
 type settableWriter struct {
@@ -133,10 +148,11 @@ func main() {
 	}
 	defer proxyData.Close()
 
-	policy := policy.NewPolicy(username, host, cmd)
-	policyControlPacket := ssh.Marshal(policy)
-	common.WriteControlPacket(control, policyControlPacket)
-	log.Printf("Policy Control sent to proxy\n")
+	execReq := common.ExecutionRequestMessage{MsgNum: common.MsgExecutionRequest, User: username, Command: cmd, Server: host}
+
+	execReqPacket := ssh.Marshal(execReq)
+	common.WriteControlPacket(control, execReqPacket)
+	log.Printf("MsgExecutionRequest sent to proxy\n")
 
 	pt, err := transportListener.Accept()
 	if err != nil {
@@ -282,7 +298,11 @@ func main() {
 	log.Printf("SSH Connected\n")
 	defer sshClient.Close()
 
-	cmdDone := resumeSSH(sshClient, cmd)
+	session, err := startCommand(sshClient, cmd)
+	if err != nil {
+		log.Printf("Failed to run command: %s", err)
+		return
+	}
 
 	// Uncomment this, together with running a long command (e.g., ping -c10 127.0.0.1),
 	// to trigger a backfill condition.
@@ -299,12 +319,6 @@ func main() {
 	serverOut.w = io.MultiWriter(serverOut.w, bufferedTraffic)
 	serverOut.mu.Unlock()
 
-	// refactor. put in separate fn. The whole client deserves a refactor
-	// and use cv
-	for !sshClient.ChannelRequestSuccessful() {
-		// ergh
-	}
-
 	sshClient.RequestKeyChange()
 	if err = <-handoffComplete; err != nil {
 		log.Printf("Handoff failed: %s", err)
@@ -312,7 +326,7 @@ func main() {
 	}
 	log.Printf("Handoff Complete")
 
-	err = <-cmdDone
+	err = session.resume()
 	if err != nil {
 		log.Printf("Command failed: %s", err)
 	}

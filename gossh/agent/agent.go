@@ -10,12 +10,11 @@ import (
 	"path/filepath"
 
 	"github.com/dimakogan/ssh/gossh/common"
-	"github.com/dimakogan/ssh/gossh/policy"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 )
 
-func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, pc policy.Policy) {
+func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, pc *ssh.Policy) {
 	var auths []ssh.AuthMethod
 	if aconn, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK")); err == nil {
 		auths = append(auths, ssh.PublicKeysCallback(agent.NewClient(aconn).Signers))
@@ -28,7 +27,6 @@ func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, pc policy.
 		log.Fatalf("Failed to get current user: %s", err)
 	}
 
-
 	clientConfig := &ssh.ClientConfig{
 		User:            curuser.Username,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
@@ -36,7 +34,7 @@ func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, pc policy.
 	}
 
 	meteredConnToServer := common.MeteredConn{Conn: toServer}
-	proxy, err := ssh.NewProxyConn(toClient, &meteredConnToServer, clientConfig, pc)
+	proxy, err := ssh.NewProxyConn(toClient, &meteredConnToServer, clientConfig, pc.FilterPacket)
 	if err != nil {
 		fmt.Print(err)
 		return
@@ -75,7 +73,6 @@ func main() {
 	var pxAddr string
 	flag.StringVar(&pxAddr, "px", "127.0.0.1", "Address for the ssh proxy.")
 
-
 	curuser, err := user.Current()
 	if err != nil {
 		log.Fatalf("Failed to get current user: %s", err)
@@ -105,15 +102,20 @@ func main() {
 		defer control.Close()
 		log.Print("New incoming control connection")
 
-		policyControl := new(policy.Policy)
-		policyControlPacket, err := common.ReadControlPacket(control)
-		if err = ssh.Unmarshal(policyControlPacket, policyControl); err != nil {
-			log.Print("Failed to unmarshal policy control: %s", err)
-			return
+		controlPacket, err := common.ReadControlPacket(control)
+		if controlPacket[0] != common.MsgExecutionRequest {
+			log.Printf("Unexpected control message: %d (expecting MsgExecutionRequest)", controlPacket[0])
+			continue
 		}
-		log.Print("Incoming control field packet")
+		execReq := new(common.ExecutionRequestMessage)
+		if err = ssh.Unmarshal(controlPacket, execReq); err != nil {
+			log.Print("Failed to unmarshal ExecutionRequestMessage: %s", err)
+			continue
+		}
 
-		err = policyControl.ValidatePolicy()
+		policyControl := ssh.NewPolicy(execReq.User, execReq.Command, execReq.Server)
+
+		err = policyControl.AskForApproval()
 		if err != nil {
 			log.Printf("Policy error: %s", err)
 			// TODO(sternh): this shouldn't exit, but rather reply to client and proceed to next req
@@ -136,7 +138,7 @@ func main() {
 		defer transport.Close()
 		log.Print("Connected to transport forwarding")
 
-		proxySSH(sshData, transport, control, *policyControl)
+		proxySSH(sshData, transport, control, policyControl)
 		log.Print("Finished Proxy session")
 		control.Close()
 		sshData.Close()
