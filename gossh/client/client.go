@@ -158,16 +158,37 @@ func main() {
 	}
 	defer control.Close()
 
-	execReq := common.ExecutionRequestMessage{
+	execReq := common.ExecutionRequestMessage {
 		MsgNum:  common.MsgExecutionRequest,
 		User:    username,
 		Command: cmd,
-		Server:  fmt.Sprintf("%s:%d", host, port)}
+		Server:  fmt.Sprintf("%s:%d", host, port),
+	}
 
 	execReqPacket := ssh.Marshal(execReq)
 	common.WriteControlPacket(control, execReqPacket)
 	log.Printf("MsgExecutionRequest sent to proxy\n")
 
+	// Wait for response before opening data connection
+	reqResponsePacket, err := common.ReadControlPacket(control)
+	if reqResponsePacket[0] != common.MsgExecutionResponse {
+		log.Printf("Unexpected control message: %d (expecting MsgExecutionResponse)", reqResponsePacket[0])
+		return
+	}
+	execResp := new(common.ExecutionResponseMessage)
+	if err = ssh.Unmarshal(reqResponsePacket, execResp); err != nil {
+		log.Printf("Failed to unmarshal ExecutionResponseMessage: %s", err)
+		return
+	}
+	if execResp.Response == common.MsgExecutionDenied {
+		log.Printf("Execution was denied: %s", execResp.Reason)
+		return
+	} else if execResp.Response != common.MsgExecutionApproved {
+		log.Printf("Unexpected Response type: %d (expecting MsgExecutionApproved)", execResp.Response)
+		return
+	}
+
+	// Proceed with approval
 	proxyData, err := ymux.Open()
 	if err != nil {
 		log.Printf("Failed to get data stream: %s", err)

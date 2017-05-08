@@ -134,10 +134,25 @@ func handleConnection(master net.Conn) {
 	err = policyControl.AskForApproval()
 	if err != nil {
 		log.Printf("Request denied: %s", err)
-		// TODO(sternh): this shouldn't exit, but rather reply to client and proceed to next req
-		// send disconnect on ssh data channel, and a deny on control channel
-		// or defer?/handle incoming connection
+
+		execDenied := common.ExecutionResponseMessage {
+			MsgNum:   common.MsgExecutionResponse,
+			Response: common.MsgExecutionDenied,
+			Reason:   fmt.Sprintf("%s", err),
+		}
+
+		execDeniedPacket := ssh.Marshal(execDenied)
+		common.WriteControlPacket(control, execDeniedPacket)
+		log.Printf("MsgExecutionDenied sent to client\n")
 		return
+	} else {
+		execAppr := common.ExecutionResponseMessage {
+			MsgNum:   common.MsgExecutionResponse,
+			Response: common.MsgExecutionApproved,
+		}
+		execApprPacket := ssh.Marshal(execAppr)
+		common.WriteControlPacket(control, execApprPacket)
+		log.Printf("MsgExecutionApproved sent to client\n")
 	}
 
 	sshData, err := ymux.Accept()

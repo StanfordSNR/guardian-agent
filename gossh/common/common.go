@@ -11,7 +11,21 @@ import (
 const debugCommon = false
 
 const MsgExecutionRequest = 1
+const MsgExecutionResponse = 2
 const MsgHandoffComplete = 10
+
+const MsgExecutionDenied = 0
+const MsgExecutionApproved = 1
+
+type ExecutionApprovedMessage struct {
+	MsgNum byte
+}
+
+type ExecutionResponseMessage struct {
+	MsgNum byte
+	Response byte
+	Reason string
+}
 
 type ExecutionRequestMessage struct {
 	MsgNum  byte
