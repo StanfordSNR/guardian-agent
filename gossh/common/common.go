@@ -11,33 +11,25 @@ import (
 const debugCommon = false
 
 const MsgExecutionRequest = 1
-const MsgExecutionResponse = 2
+const MsgExecutionRequestAccept = 2
+const MsgExecutionRequestDeny = 2
 const MsgHandoffComplete = 10
 
 const MsgExecutionDenied = 0
 const MsgExecutionApproved = 1
 
 type ExecutionApprovedMessage struct {
-	MsgNum byte
-}
-
-type ExecutionResponseMessage struct {
-	MsgNum byte
-	Response byte
-	Reason string
 }
 
 const NoMoreSessionRequestName = "no-more-sessions@openssh.com"
 
 type ExecutionRequestMessage struct {
-	MsgNum  byte
 	User    string
 	Command string
 	Server  string
 }
 
 type HandoffCompleteMessage struct {
-	MsgNum            byte
 	NextTransportByte uint32
 }
 
@@ -75,34 +67,35 @@ func (cc *CustomConn) Write(b []byte) (n int, err error) {
 	return
 }
 
-func ReadControlPacket(r io.Reader) (p []byte, err error) {
+func ReadControlPacket(r io.Reader) (msgNum byte, payload []byte, err error) {
 	var packetLenBytes [4]byte
 	_, err = io.ReadFull(r, packetLenBytes[:])
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 	length := binary.BigEndian.Uint32(packetLenBytes[:])
 	if debugCommon {
 		log.Printf("read len bytes: %s, len: %d", hex.EncodeToString(packetLenBytes[:]), length)
 	}
-	p = make([]byte, length)
-	_, err = io.ReadFull(r, p[:])
+	payload = make([]byte, length)
+	_, err = io.ReadFull(r, payload[:])
 	if debugCommon {
-		log.Printf("read: %s", hex.EncodeToString(p[:]))
+		log.Printf("read: %s", hex.EncodeToString(payload[:]))
 	}
 
-	return p, err
+	return payload[0], payload[1:], err
 }
 
-func WriteControlPacket(w io.Writer, p []byte) error {
-	var packetLenBytes [4]byte
-	binary.BigEndian.PutUint32(packetLenBytes[:], uint32(len(p)))
+func WriteControlPacket(w io.Writer, msgNum byte, payload []byte) error {
+	var packetHeader [5]byte
+	binary.BigEndian.PutUint32(packetHeader[:], uint32(len(payload)+1))
+	packetHeader[4] = msgNum
 	if debugCommon {
-		log.Printf("written len: %s", hex.EncodeToString(packetLenBytes[:]))
+		log.Printf("written len: %d", len(payload)+1)
 	}
-	if _, err := w.Write(packetLenBytes[:]); err != nil {
+	if _, err := w.Write(packetHeader[:]); err != nil {
 		return err
 	}
-	_, err := w.Write(p)
+	_, err := w.Write(payload)
 	return err
 }

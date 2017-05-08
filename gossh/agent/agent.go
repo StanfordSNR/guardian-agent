@@ -63,11 +63,10 @@ func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, pc *ssh.Po
 	}
 
 	handshakeCompletedMsg := common.HandoffCompleteMessage{
-		MsgNum:            common.MsgHandoffComplete,
 		NextTransportByte: uint32(meteredConnToServer.BytesRead() - proxy.BufferedFromServer()),
 	}
 	packet := ssh.Marshal(handshakeCompletedMsg)
-	return common.WriteControlPacket(control, packet)
+	return common.WriteControlPacket(control, common.MsgHandoffComplete, packet)
 }
 
 func main() {
@@ -118,13 +117,13 @@ func handleConnection(master net.Conn) {
 	}
 	defer control.Close()
 
-	controlPacket, err := common.ReadControlPacket(control)
-	if controlPacket[0] != common.MsgExecutionRequest {
-		log.Printf("Unexpected control message: %d (expecting MsgExecutionRequest)", controlPacket[0])
+	msgNum, payload, err := common.ReadControlPacket(control)
+	if msgNum != common.MsgExecutionRequest {
+		log.Printf("Unexpected control message: %d (expecting MsgExecutionRequest)", msgNum)
 		return
 	}
 	execReq := new(common.ExecutionRequestMessage)
-	if err = ssh.Unmarshal(controlPacket, execReq); err != nil {
+	if err = ssh.Unmarshal(payload, execReq); err != nil {
 		log.Printf("Failed to unmarshal ExecutionRequestMessage: %s", err)
 		return
 	}
@@ -134,26 +133,11 @@ func handleConnection(master net.Conn) {
 	err = policyControl.AskForApproval()
 	if err != nil {
 		log.Printf("Request denied: %s", err)
-
-		execDenied := common.ExecutionResponseMessage {
-			MsgNum:   common.MsgExecutionResponse,
-			Response: common.MsgExecutionDenied,
-			Reason:   fmt.Sprintf("%s", err),
-		}
-
-		execDeniedPacket := ssh.Marshal(execDenied)
-		common.WriteControlPacket(control, execDeniedPacket)
-		log.Printf("MsgExecutionDenied sent to client\n")
+		common.WriteControlPacket(control, common.MsgExecutionDenied, []byte{})
 		return
-	} else {
-		execAppr := common.ExecutionResponseMessage {
-			MsgNum:   common.MsgExecutionResponse,
-			Response: common.MsgExecutionApproved,
-		}
-		execApprPacket := ssh.Marshal(execAppr)
-		common.WriteControlPacket(control, execApprPacket)
-		log.Printf("MsgExecutionApproved sent to client\n")
 	}
+	common.WriteControlPacket(control, common.MsgExecutionApproved, []byte{})
+	log.Printf("Request approved\n")
 
 	sshData, err := ymux.Accept()
 	if err != nil {
