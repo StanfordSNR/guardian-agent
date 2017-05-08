@@ -133,7 +133,7 @@ func main() {
 	if flag.NArg() < 2 {
 		cmd = "ls -la"
 	} else {
-		cmd = flag.Args()[1]
+		cmd = strings.Join(flag.Args()[1:], " ")
 	}
 
 	log.Printf("Host: %s, Port: %d, User: %s\n", host, port, username)
@@ -325,6 +325,15 @@ func main() {
 	if err != nil {
 		log.Printf("Failed to run command: %s", err)
 		return
+	}
+
+	ok, _, err := sshClient.SendRequest(common.NoMoreSessionRequestName, true, nil)
+	if err != nil {
+		log.Printf("Failed to send %s: %s", common.NoMoreSessionRequestName, err)
+		return
+	}
+	if !ok {
+		log.Printf("%s request denied, continuing", common.NoMoreSessionRequestName)
 	}
 
 	// Uncomment this, together with running a long command (e.g., ping -c10 127.0.0.1),

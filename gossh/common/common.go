@@ -13,6 +13,8 @@ const debugCommon = false
 const MsgExecutionRequest = 1
 const MsgHandoffComplete = 10
 
+const NoMoreSessionRequestName = "no-more-sessions@openssh.com"
+
 type ExecutionRequestMessage struct {
 	MsgNum  byte
 	User    string
