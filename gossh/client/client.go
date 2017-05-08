@@ -350,7 +350,7 @@ func main() {
 
 	// Uncomment this, together with running a long command (e.g., ping -c10 127.0.0.1),
 	// to trigger a backfill condition.
-	// time.Sleep(2 * time.Second)
+	time.Sleep(2 * time.Second)
 	handoffComplete := make(chan error, 1)
 	doHandoffOnKex <- handoffComplete
 
