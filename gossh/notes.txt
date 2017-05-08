@@ -1,0 +1,7 @@
+Todo:
+
+- no more sessions
+- key auth for client to agent
+- thin vs fat
+- window sizing so proxy doesnt deal with response
+- 
