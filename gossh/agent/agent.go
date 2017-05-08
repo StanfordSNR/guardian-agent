@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"path"
 
 	"github.com/dimakogan/ssh/gossh/common"
+	"github.com/hashicorp/yamux"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
@@ -71,16 +73,7 @@ func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, pc *ssh.Po
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	var cport int
-	flag.IntVar(&cport, "c", 2345, "Control port to listen on.")
-
-	var dport int
-	flag.IntVar(&dport, "d", 3434, "SSH data port to listen to.")
-
-	var tport int
-	flag.IntVar(&tport, "t", 6789, "Transport port to connect to.")
-
-	var pxAddr string
-	flag.StringVar(&pxAddr, "px", "127.0.0.1", "Address for the ssh proxy.")
+	flag.IntVar(&cport, "l", 2345, "Proxy port to listen on.")
 
 	curuser, err := user.Current()
 	if err != nil {
@@ -91,66 +84,81 @@ func main() {
 
 	flag.Parse()
 
-	controlListener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", pxAddr, cport))
+	masterListener, err := net.Listen("tcp", fmt.Sprintf(":%d", cport))
 	if err != nil {
 		log.Fatalf("Failed to listen on control port %d: %s", cport, err)
 	}
-	defer controlListener.Close()
-
-	dataListener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", pxAddr, dport))
-	if err != nil {
-		log.Fatalf("Failed to listen on data port %d: %s", dport, err)
-	}
-	defer dataListener.Close()
+	defer masterListener.Close()
 
 	for {
-		control, err := controlListener.Accept()
+		master, err := masterListener.Accept()
 		if err != nil {
-			log.Printf("Failed to accept control connection: %s", err)
-		}
-		defer control.Close()
-		log.Print("New incoming control connection")
-
-		controlPacket, err := common.ReadControlPacket(control)
-		if controlPacket[0] != common.MsgExecutionRequest {
-			log.Printf("Unexpected control message: %d (expecting MsgExecutionRequest)", controlPacket[0])
+			log.Printf("Failed to accept connection: %s", err)
 			continue
 		}
-		execReq := new(common.ExecutionRequestMessage)
-		if err = ssh.Unmarshal(controlPacket, execReq); err != nil {
-			log.Print("Failed to unmarshal ExecutionRequestMessage: %s", err)
-			continue
-		}
-
-		policyControl := ssh.NewPolicy(execReq.User, execReq.Command, execReq.Server)
-
-		err = policyControl.AskForApproval()
-		if err != nil {
-			log.Printf("Policy error: %s", err)
-			// TODO(sternh): this shouldn't exit, but rather reply to client and proceed to next req
-			// send disconnect on ssh data channel, and a deny on control channel
-			// or defer?/handle incoming connection
-			continue
-		}
-
-		sshData, err := dataListener.Accept()
-		if err != nil {
-			log.Printf("Failed to accept data connection: %s", err)
-		}
-		defer sshData.Close()
-		log.Print("New incoming data connection")
-
-		transport, err := net.Dial("tcp", fmt.Sprintf("%s:%d", pxAddr, tport))
-		if err != nil {
-			log.Printf("Failed to connect to local port %d: %s", tport, err)
-		}
-		defer transport.Close()
-		log.Print("Connected to transport forwarding")
-
-		err = proxySSH(sshData, transport, control, policyControl)
-		log.Printf("Finished Proxy session: %s", err)
-		control.Close()
-		sshData.Close()
-		transport.Close()
+		handleConnection(master)
 	}
+}
+
+func handleConnection(master net.Conn) {
+	log.Printf("New incoming connection from %s", master.RemoteAddr())
+
+	ymux, err := yamux.Server(master, nil)
+	if err != nil {
+		log.Printf("Failed to start ymux: %s", err)
+		master.Close()
+		return
+	}
+	defer ymux.Close()
+
+	control, err := ymux.Accept()
+	if err != nil {
+		log.Printf("Failed to accept control stream: %s", err)
+		return
+	}
+	defer control.Close()
+
+	controlPacket, err := common.ReadControlPacket(control)
+	if controlPacket[0] != common.MsgExecutionRequest {
+		log.Printf("Unexpected control message: %d (expecting MsgExecutionRequest)", controlPacket[0])
+		return
+	}
+	execReq := new(common.ExecutionRequestMessage)
+	if err = ssh.Unmarshal(controlPacket, execReq); err != nil {
+		log.Printf("Failed to unmarshal ExecutionRequestMessage: %s", err)
+		return
+	}
+
+	policyControl := ssh.NewPolicy(execReq.User, execReq.Command, execReq.Server)
+
+	err = policyControl.AskForApproval()
+	if err != nil {
+		log.Printf("Request denied: %s", err)
+		// TODO(sternh): this shouldn't exit, but rather reply to client and proceed to next req
+		// send disconnect on ssh data channel, and a deny on control channel
+		// or defer?/handle incoming connection
+		return
+	}
+
+	sshData, err := ymux.Accept()
+	if err != nil {
+		log.Printf("Failed to accept data stream: %s", err)
+		return
+	}
+	defer sshData.Close()
+
+	transport, err := ymux.Accept()
+	if err != nil {
+		log.Printf("Failed to get transport stream: %s", err)
+		return
+	}
+	defer transport.Close()
+
+	err = proxySSH(sshData, transport, control, policyControl)
+	transport.Close()
+	sshData.Close()
+	control.Close()
+	// Wait for client to close master connection
+	ioutil.ReadAll(master)
+	log.Printf("Finished Proxy session: %s", err)
 }

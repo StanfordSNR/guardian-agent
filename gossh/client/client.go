@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/dimakogan/ssh/gossh/common"
+	"github.com/hashicorp/yamux"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -108,14 +109,10 @@ func main() {
 
 	var port int
 	flag.IntVar(&port, "p", 22, "Port to connect to on the remote host.")
-	var cport int
-	flag.IntVar(&cport, "c", 2345, "Proxy control port to connect to.")
-	var dport int
-	flag.IntVar(&dport, "d", 3434, "Data port to connect to.")
-	var tport int
-	flag.IntVar(&tport, "t", 6789, "Transport port to listen to.")
 	var pxAddr string
 	flag.StringVar(&pxAddr, "px", "127.0.0.1", "Address for the ssh proxy.")
+	var pxPort int
+	flag.IntVar(&pxPort, "c", 2345, "Proxy port to connect to.")
 
 	flag.Parse()
 	if flag.NArg() < 1 {
@@ -148,23 +145,18 @@ func main() {
 	}
 	defer serverConn.Close()
 
-	transportListener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", pxAddr, tport))
+	master, err := net.Dial("tcp", fmt.Sprintf("%s:%d", pxAddr, pxPort))
 	if err != nil {
-		log.Fatalf("Failed to Listen on port %d: %s", tport, err)
+		log.Printf("Failed to connect to proxy  %s:%d: %s", pxAddr, pxPort, err)
 	}
-	defer transportListener.Close()
 
-	control, err := net.Dial("tcp", fmt.Sprintf("%s:%d", pxAddr, cport))
+	ymux, err := yamux.Client(master, nil)
+	defer ymux.Close()
+	control, err := ymux.Open()
 	if err != nil {
-		log.Printf("Failed to connect to proxy port %d: %s", cport, err)
+		log.Printf("Failed to get control stream: %s", err)
 	}
 	defer control.Close()
-
-	proxyData, err := net.Dial("tcp", fmt.Sprintf("%s:%d", pxAddr, dport))
-	if err != nil {
-		log.Printf("Failed to connect to proxy data port %d: %s", dport, err)
-	}
-	defer proxyData.Close()
 
 	execReq := common.ExecutionRequestMessage{
 		MsgNum:  common.MsgExecutionRequest,
@@ -176,9 +168,15 @@ func main() {
 	common.WriteControlPacket(control, execReqPacket)
 	log.Printf("MsgExecutionRequest sent to proxy\n")
 
-	pt, err := transportListener.Accept()
+	proxyData, err := ymux.Open()
 	if err != nil {
-		log.Printf("Failed to Accept connection: %s", err)
+		log.Printf("Failed to get data stream: %s", err)
+	}
+	defer proxyData.Close()
+
+	pt, err := ymux.Open()
+	if err != nil {
+		log.Printf("Failed to get transport stream: %s", err)
 	}
 	proxyTransport := common.CustomConn{Conn: pt}
 	defer proxyTransport.Close()
@@ -206,7 +204,7 @@ func main() {
 	proxyTransportDone := make(chan error)
 	go func() {
 		_, err := io.Copy(serverConn, &proxyTransport)
-		log.Printf("Finsihed copying transport data from proxy")
+		log.Printf("Finished copying transport data from proxy")
 		proxyTransportDone <- err
 	}()
 
@@ -261,6 +259,9 @@ func main() {
 		time.Sleep(500 * time.Millisecond)
 		serverOut.mu.Lock()
 		serverOut.w = sshPipe
+
+		// Close the connection to the proxy
+		master.Close()
 
 		backfillLen := int(uint32(proxyTransport.BytesWritten()) - handoffMsg.NextTransportByte)
 		if backfillLen < 0 {
@@ -352,4 +353,5 @@ func main() {
 	if err != nil {
 		log.Printf("Command failed: %s", err)
 	}
+	log.Printf("Done")
 }

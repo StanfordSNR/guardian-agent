@@ -8,6 +8,8 @@ import (
 	"net"
 )
 
+const debugCommon = false
+
 const MsgExecutionRequest = 1
 const MsgHandoffComplete = 10
 
@@ -64,10 +66,14 @@ func ReadControlPacket(r io.Reader) (p []byte, err error) {
 		return nil, err
 	}
 	length := binary.BigEndian.Uint32(packetLenBytes[:])
-	log.Printf("read len bytes: %s, len: %d", hex.EncodeToString(packetLenBytes[:]), length)
+	if debugCommon {
+		log.Printf("read len bytes: %s, len: %d", hex.EncodeToString(packetLenBytes[:]), length)
+	}
 	p = make([]byte, length)
 	_, err = io.ReadFull(r, p[:])
-	log.Printf("read: %s", hex.EncodeToString(p[:]))
+	if debugCommon {
+		log.Printf("read: %s", hex.EncodeToString(p[:]))
+	}
 
 	return p, err
 }
@@ -75,11 +81,12 @@ func ReadControlPacket(r io.Reader) (p []byte, err error) {
 func WriteControlPacket(w io.Writer, p []byte) error {
 	var packetLenBytes [4]byte
 	binary.BigEndian.PutUint32(packetLenBytes[:], uint32(len(p)))
-	log.Printf("written len: %s", hex.EncodeToString(packetLenBytes[:]))
+	if debugCommon {
+		log.Printf("written len: %s", hex.EncodeToString(packetLenBytes[:]))
+	}
 	if _, err := w.Write(packetLenBytes[:]); err != nil {
 		return err
 	}
-	log.Printf("written: %s", hex.EncodeToString(p[:]))
 	_, err := w.Write(p)
 	return err
 }
