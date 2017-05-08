@@ -23,29 +23,37 @@ type HandoffCompleteMessage struct {
 	NextTransportByte uint32
 }
 
-type MeteredConn struct {
+type CustomConn struct {
 	net.Conn
-	bytesRead    int
-	bytesWritten int
+	RemoteAddress net.Addr
+	bytesRead     int
+	bytesWritten  int
 }
 
-func (mc *MeteredConn) BytesRead() int {
-	return mc.bytesRead
+func (cc *CustomConn) RemoteAddr() net.Addr {
+	if cc.RemoteAddress != nil {
+		return cc.RemoteAddress
+	}
+	return cc.Conn.RemoteAddr()
 }
 
-func (mc *MeteredConn) BytesWritten() int {
-	return mc.bytesWritten
+func (cc *CustomConn) BytesRead() int {
+	return cc.bytesRead
 }
 
-func (mc *MeteredConn) Read(p []byte) (n int, err error) {
-	n, err = mc.Conn.Read(p)
-	mc.bytesRead += n
+func (cc *CustomConn) BytesWritten() int {
+	return cc.bytesWritten
+}
+
+func (cc *CustomConn) Read(p []byte) (n int, err error) {
+	n, err = cc.Conn.Read(p)
+	cc.bytesRead += n
 	return
 }
 
-func (mc *MeteredConn) Write(b []byte) (n int, err error) {
-	n, err = mc.Conn.Write(b)
-	mc.bytesWritten += n
+func (cc *CustomConn) Write(b []byte) (n int, err error) {
+	n, err = cc.Conn.Write(b)
+	cc.bytesWritten += n
 	return
 }
 

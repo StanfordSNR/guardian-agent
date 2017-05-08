@@ -60,10 +60,28 @@ func startCommand(conn *ssh.Client, cmd string) (cmdExec *commandExecution, err 
 }
 
 func (cmdExec *commandExecution) resume() error {
+	defer cmdExec.session.Close()
 	go io.Copy(cmdExec.stdin, os.Stdin)
-	go io.Copy(os.Stdout, cmdExec.stdout)
-	go io.Copy(os.Stderr, cmdExec.stderr)
-	return cmdExec.session.Wait()
+	done := make(chan error)
+	go func() {
+		_, err := io.Copy(os.Stdout, cmdExec.stdout)
+		done <- err
+	}()
+	go func() {
+		_, err := io.Copy(os.Stderr, cmdExec.stderr)
+		done <- err
+	}()
+
+	errExec := cmdExec.session.Wait()
+	errOut1 := <-done
+	errOut2 := <-done
+	if errExec != nil {
+		return errExec
+	}
+	if errOut1 != nil {
+		return errOut1
+	}
+	return errOut2
 }
 
 type settableWriter struct {
@@ -148,7 +166,11 @@ func main() {
 	}
 	defer proxyData.Close()
 
-	execReq := common.ExecutionRequestMessage{MsgNum: common.MsgExecutionRequest, User: username, Command: cmd, Server: host}
+	execReq := common.ExecutionRequestMessage{
+		MsgNum:  common.MsgExecutionRequest,
+		User:    username,
+		Command: cmd,
+		Server:  fmt.Sprintf("%s:%d", host, port)}
 
 	execReqPacket := ssh.Marshal(execReq)
 	common.WriteControlPacket(control, execReqPacket)
@@ -158,7 +180,7 @@ func main() {
 	if err != nil {
 		log.Printf("Failed to Accept connection: %s", err)
 	}
-	proxyTransport := common.MeteredConn{Conn: pt}
+	proxyTransport := common.CustomConn{Conn: pt}
 	defer proxyTransport.Close()
 	log.Print("Got connection back from proxy\n")
 

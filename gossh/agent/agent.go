@@ -9,46 +9,55 @@ import (
 	"os/user"
 	"path/filepath"
 
+	"path"
+
 	"github.com/dimakogan/ssh/gossh/common"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
-func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, pc *ssh.Policy) {
+func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, pc *ssh.Policy) error {
 	var auths []ssh.AuthMethod
-	if aconn, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK")); err == nil {
-		auths = append(auths, ssh.PublicKeysCallback(agent.NewClient(aconn).Signers))
+	aconn, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK"))
+	if err != nil {
+		return err
 	}
 
-	log.Printf("Connected to SSH_AUTH_SOCK")
+	auths = append(auths, ssh.PublicKeysCallback(agent.NewClient(aconn).Signers))
+
+	if err != nil {
+		return err
+	}
 
 	curuser, err := user.Current()
 	if err != nil {
 		log.Fatalf("Failed to get current user: %s", err)
 	}
-
+	kh, err := knownhosts.New(path.Join(curuser.HomeDir, ".ssh", "known_hosts"))
+	if err != nil {
+		return err
+	}
 	clientConfig := &ssh.ClientConfig{
-		User:            curuser.Username,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		User:            pc.User,
+		HostKeyCallback: kh,
 		Auth:            auths,
 	}
 
-	meteredConnToServer := common.MeteredConn{Conn: toServer}
-	proxy, err := ssh.NewProxyConn(toClient, &meteredConnToServer, clientConfig, pc.FilterPacket)
+	meteredConnToServer := common.CustomConn{Conn: toServer}
+	proxy, err := ssh.NewProxyConn(pc.Server, toClient, &meteredConnToServer, clientConfig, pc.FilterPacket)
 	if err != nil {
-		fmt.Print(err)
-		return
+		return err
 	}
 	err = proxy.UpdateClientSessionParams()
 	if err != nil {
-		fmt.Print(err)
-		return
+		return err
 	}
 
 	done := proxy.Run()
 	err = <-done
 	if err != nil {
-		log.Fatalf("Got error from proxy: %s", err)
+		return err
 	}
 
 	handshakeCompletedMsg := common.HandoffCompleteMessage{
@@ -56,7 +65,7 @@ func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, pc *ssh.Po
 		NextTransportByte: uint32(meteredConnToServer.BytesRead() - proxy.BufferedFromServer()),
 	}
 	packet := ssh.Marshal(handshakeCompletedMsg)
-	common.WriteControlPacket(control, packet)
+	return common.WriteControlPacket(control, packet)
 }
 
 func main() {
@@ -138,8 +147,8 @@ func main() {
 		defer transport.Close()
 		log.Print("Connected to transport forwarding")
 
-		proxySSH(sshData, transport, control, policyControl)
-		log.Print("Finished Proxy session")
+		err = proxySSH(sshData, transport, control, policyControl)
+		log.Printf("Finished Proxy session: %s", err)
 		control.Close()
 		sshData.Close()
 		transport.Close()
