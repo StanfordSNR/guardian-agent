@@ -13,6 +13,7 @@ const debugCommon = false
 const MsgExecutionRequest = 1
 const MsgExecutionRequestAccept = 2
 const MsgExecutionRequestDeny = 2
+// const MsgHandoffInit = 9
 const MsgHandoffComplete = 10
 
 const MsgExecutionDenied = 0
@@ -21,13 +22,14 @@ const MsgExecutionApproved = 1
 type ExecutionApprovedMessage struct {
 }
 
-const NoMoreSessionRequestName = "no-more-sessions@openssh.com"
-
 type ExecutionRequestMessage struct {
 	User    string
 	Command string
 	Server  string
 }
+
+// type HandoffInitMessage struct {
+// }
 
 type HandoffCompleteMessage struct {
 	NextTransportByte uint32

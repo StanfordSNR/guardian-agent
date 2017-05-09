@@ -334,13 +334,13 @@ func main() {
 		return
 	}
 
-	ok, _, err := sshClient.SendRequest(common.NoMoreSessionRequestName, true, nil)
+	ok, _, err := sshClient.SendRequest(ssh.NoMoreSessionRequestName, true, nil)
 	if err != nil {
-		log.Printf("Failed to send %s: %s", common.NoMoreSessionRequestName, err)
+		log.Printf("Failed to send %s: %s", ssh.NoMoreSessionRequestName, err)
 		return
 	}
 	if !ok {
-		log.Printf("%s request denied, continuing", common.NoMoreSessionRequestName)
+		log.Printf("%s request denied, continuing", ssh.NoMoreSessionRequestName)
 	}
 
 	// Uncomment this, together with running a long command (e.g., ping -c10 127.0.0.1),
@@ -350,6 +350,8 @@ func main() {
 	doHandoffOnKex <- handoffComplete
 
 	log.Printf("Initiating Handoff Key Exchange")
+	// Announce it on Control Channel
+	// common.WriteControlPacket(control, common.MsgHandoffInit, []byte{})
 
 	// First start buffering traffic from the server, since packets
 	// sent by ther server after msgNewKeys might need to replayed

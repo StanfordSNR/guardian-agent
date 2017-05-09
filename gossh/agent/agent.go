@@ -57,6 +57,7 @@ func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, pc *ssh.Po
 	}
 
 	done := proxy.Run()
+
 	err = <-done
 	if err != nil {
 		return err
