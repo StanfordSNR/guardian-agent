@@ -19,6 +19,8 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+const debugClient = false
+
 type commandExecution struct {
 	session *ssh.Session
 	stdin   io.WriteCloser
@@ -62,7 +64,10 @@ func startCommand(conn *ssh.Client, cmd string) (cmdExec *commandExecution, err 
 
 func (cmdExec *commandExecution) resume() error {
 	defer cmdExec.session.Close()
-	go io.Copy(cmdExec.stdin, os.Stdin)
+	go func() {
+		io.Copy(cmdExec.stdin, os.Stdin)
+		cmdExec.stdin.Close()
+	}()
 	done := make(chan error)
 	go func() {
 		_, err := io.Copy(os.Stdout, cmdExec.stdout)
@@ -136,7 +141,9 @@ func main() {
 		cmd = strings.Join(flag.Args()[1:], " ")
 	}
 
-	log.Printf("Host: %s, Port: %d, User: %s\n", host, port, username)
+	if debugClient {
+		log.Printf("Host: %s, Port: %d, User: %s\n", host, port, username)
+	}
 
 	addr := fmt.Sprintf("%s:%d", host, port)
 	serverConn, err := net.Dial("tcp", addr)
@@ -165,8 +172,11 @@ func main() {
 	}
 
 	execReqPacket := ssh.Marshal(execReq)
-	common.WriteControlPacket(control, common.MsgExecutionRequest, execReqPacket)
-	log.Printf("MsgExecutionRequest sent to proxy\n")
+	err = common.WriteControlPacket(control, common.MsgExecutionRequest, execReqPacket)
+	if err != nil {
+		log.Printf("Failed to send MsgExecutionRequest to proxy\n")
+		return
+	}
 
 	// Wait for response before opening data connection
 	msgNum, _, err := common.ReadControlPacket(control)
@@ -187,9 +197,6 @@ func main() {
 	}
 	proxyTransport := common.CustomConn{Conn: pt}
 	defer proxyTransport.Close()
-	log.Print("Got connection back from proxy\n")
-
-	log.Printf("Starting delegated client...")
 
 	sshClientConn, sshPipe := net.Pipe()
 
@@ -203,7 +210,9 @@ func main() {
 	proxyDone := make(chan error)
 	go func() {
 		_, err := io.Copy(&proxyOut, proxyData)
-		log.Printf("Finsihed copying ssh data from proxy: %s", err)
+		if debugClient {
+			log.Printf("Finished copying ssh data from proxy: %s", err)
+		}
 		proxyDone <- err
 	}()
 
@@ -211,7 +220,9 @@ func main() {
 	proxyTransportDone := make(chan error)
 	go func() {
 		_, err := io.Copy(serverConn, &proxyTransport)
-		log.Printf("Finished copying transport data from proxy")
+		if debugClient {
+			log.Printf("Finished copying transport data from proxy")
+		}
 		proxyTransportDone <- err
 	}()
 
@@ -221,7 +232,9 @@ func main() {
 	// packets that the server has sent after msgNewKeys).
 	bufferedTraffic := new(bytes.Buffer)
 	kexCallback := func(err error) {
-		log.Printf("KexCallback called")
+		if debugClient {
+			log.Printf("KexCallback called")
+		}
 		var done chan error
 		select {
 		case done = <-doHandoffOnKex:
@@ -235,7 +248,9 @@ func main() {
 			return
 		}
 
-		log.Printf("Starting transport rewiring")
+		if debugClient {
+			log.Printf("Starting transport rewiring")
+		}
 
 		if err = <-proxyTransportDone; err != nil {
 			done <- fmt.Errorf("Proxy transport forwarding failed: %s", err)
@@ -261,7 +276,9 @@ func main() {
 			return
 		}
 
-		log.Printf("Got handoffMsg.NextTransportByte: %d", handoffMsg.NextTransportByte)
+		if debugClient {
+			log.Printf("Got handoffMsg.NextTransportByte: %d", handoffMsg.NextTransportByte)
+		}
 
 		time.Sleep(500 * time.Millisecond)
 		serverOut.mu.Lock()
@@ -279,7 +296,9 @@ func main() {
 			return
 		}
 		if backfillLen == 0 {
-			log.Printf("No backfill necessary")
+			if debugClient {
+				log.Printf("No backfill necessary")
+			}
 			done <- nil
 			serverOut.mu.Unlock()
 			return
@@ -298,7 +317,9 @@ func main() {
 			if err != nil {
 				done <- fmt.Errorf("Failed to backfill traffic from server to client: %s", err)
 			}
-			log.Printf("Backfilled %d bytes from server to client", n)
+			if debugClient {
+				log.Printf("Backfilled %d bytes from server to client", n)
+			}
 			done <- nil
 		}()
 	}
@@ -318,14 +339,11 @@ func main() {
 		return
 	}
 
-	log.Printf("Creating NewClienConn")
-
 	sshClient := ssh.NewClient(c, chans, reqs)
 	if sshClient == nil {
-		log.Printf("unable to connect to [%s]: %v", addr, err)
+		log.Printf("Failed to connect to [%s]: %v", addr, err)
 	}
 
-	log.Printf("SSH Connected\n")
 	defer sshClient.Close()
 
 	session, err := startCommand(sshClient, cmd)
@@ -349,7 +367,9 @@ func main() {
 	handoffComplete := make(chan error, 1)
 	doHandoffOnKex <- handoffComplete
 
-	log.Printf("Initiating Handoff Key Exchange")
+	if debugClient {
+		log.Printf("Initiating Handoff Key Exchange")
+	}
 
 	// First start buffering traffic from the server, since packets
 	// sent by ther server after msgNewKeys might need to replayed
@@ -363,11 +383,12 @@ func main() {
 		log.Printf("Handoff failed: %s", err)
 		return
 	}
-	log.Printf("Handoff Complete")
+	if debugClient {
+		log.Printf("Handoff Complete")
+	}
 
 	err = session.resume()
 	if err != nil {
 		log.Printf("Command failed: %s", err)
 	}
-	log.Printf("Done")
 }

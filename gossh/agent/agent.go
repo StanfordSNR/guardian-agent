@@ -137,7 +137,6 @@ func handleConnection(master net.Conn) {
 		return
 	}
 	common.WriteControlPacket(control, common.MsgExecutionApproved, []byte{})
-	log.Printf("Request approved\n")
 
 	sshData, err := ymux.Accept()
 	if err != nil {
@@ -159,5 +158,10 @@ func handleConnection(master net.Conn) {
 	control.Close()
 	// Wait for client to close master connection
 	ioutil.ReadAll(master)
-	log.Printf("Finished Proxy session: %s", err)
+
+	if err == nil {
+		log.Printf("Session complete OK")
+	} else {
+		log.Printf("Proxy session finished with error: %s", err)
+	}
 }
