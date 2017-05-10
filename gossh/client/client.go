@@ -352,13 +352,13 @@ func main() {
 		return
 	}
 
-	ok, _, err := sshClient.SendRequest(common.NoMoreSessionRequestName, true, nil)
+	ok, _, err := sshClient.SendRequest(ssh.NoMoreSessionRequestName, true, nil)
 	if err != nil {
-		log.Printf("Failed to send %s: %s", common.NoMoreSessionRequestName, err)
+		log.Printf("Failed to send %s: %s", ssh.NoMoreSessionRequestName, err)
 		return
 	}
 	if !ok {
-		log.Printf("%s request denied, continuing", common.NoMoreSessionRequestName)
+		log.Printf("%s request denied, continuing", ssh.NoMoreSessionRequestName)
 	}
 
 	// Uncomment this, together with running a long command (e.g., ping -c10 127.0.0.1),

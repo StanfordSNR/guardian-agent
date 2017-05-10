@@ -21,8 +21,6 @@ const MsgExecutionApproved = 1
 type ExecutionApprovedMessage struct {
 }
 
-const NoMoreSessionRequestName = "no-more-sessions@openssh.com"
-
 type ExecutionRequestMessage struct {
 	User    string
 	Command string
