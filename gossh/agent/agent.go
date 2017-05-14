@@ -47,7 +47,7 @@ func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, pc *ssh.Po
 	}
 
 	meteredConnToServer := common.CustomConn{Conn: toServer}
-	proxy, err := ssh.NewProxyConn(pc.Server, toClient, &meteredConnToServer, clientConfig, pc.FilterPacket)
+	proxy, err := ssh.NewProxyConn(pc.Server, toClient, &meteredConnToServer, clientConfig, pc.FilterClientPacket, pc.FilterServerPacket)
 	if err != nil {
 		return err
 	}
