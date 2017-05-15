@@ -17,7 +17,14 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
+	"golang.org/x/crypto/sha3"
 )
+
+type policyStore map[[32]byte]bool
+
+func hashPolicyID(pc *ssh.Policy) (hash [32]byte) {
+	return sha3.Sum256([]byte(pc.User + "||" + pc.Server))
+} 
 
 func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, pc *ssh.Policy) error {
 	var auths []ssh.AuthMethod
@@ -90,17 +97,22 @@ func main() {
 	}
 	defer masterListener.Close()
 
+	// can and should be refactored if we do one agent in all rather than one per connection
+	// Similarly, if we choose to enable a mode to remember per command approval (rather than all commands)
+	// should make it map to an array of commands, with a wildcard to signify all.
+	store := make(policyStore)
+
 	for {
 		master, err := masterListener.Accept()
 		if err != nil {
 			log.Printf("Failed to accept connection: %s", err)
 			continue
 		}
-		handleConnection(master)
+		handleConnection(master, store)
 	}
 }
 
-func handleConnection(master net.Conn) {
+func handleConnection(master net.Conn, store policyStore) {
 	log.Printf("New incoming connection from %s", master.RemoteAddr())
 
 	ymux, err := yamux.Server(master, nil)
@@ -131,11 +143,15 @@ func handleConnection(master net.Conn) {
 
 	policy := ssh.NewPolicy(execReq.User, execReq.Command, execReq.Server)
 
-	err = policy.AskForApproval()
-	if err != nil {
-		log.Printf("Request denied: %s", err)
-		common.WriteControlPacket(control, common.MsgExecutionDenied, []byte{})
-		return
+	// to be changed if per command approval enabled
+	_, policyStored := store[hashPolicyID(policy)]
+	if !policyStored {
+		err = policy.AskForApproval(store, hashPolicyID)
+		if err != nil {
+			log.Printf("Request denied: %s", err)
+			common.WriteControlPacket(control, common.MsgExecutionDenied, []byte{})
+			return
+		}
 	}
 	common.WriteControlPacket(control, common.MsgExecutionApproved, []byte{})
 
