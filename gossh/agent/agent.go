@@ -129,9 +129,9 @@ func handleConnection(master net.Conn) {
 		return
 	}
 
-	policyControl := ssh.NewPolicy(execReq.User, execReq.Command, execReq.Server)
+	policy := ssh.NewPolicy(execReq.User, execReq.Command, execReq.Server)
 
-	err = policyControl.AskForApproval()
+	err = policy.AskForApproval()
 	if err != nil {
 		log.Printf("Request denied: %s", err)
 		common.WriteControlPacket(control, common.MsgExecutionDenied, []byte{})
@@ -153,7 +153,7 @@ func handleConnection(master net.Conn) {
 	}
 	defer transport.Close()
 
-	err = proxySSH(sshData, transport, control, policyControl)
+	err = proxySSH(sshData, transport, control, policy)
 	transport.Close()
 	sshData.Close()
 	control.Close()
