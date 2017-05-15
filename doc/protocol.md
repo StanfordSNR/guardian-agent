@@ -222,3 +222,40 @@ the chronology of the events.
 1. Task resumption
 
     1. The connection is now between server and client.
+
+## Random Notes (from May 14 - to be used on doc update)
+
+* Currently, the first key exchange after the proxy is initialized acts as the Handoff Initialization.
+  In future versions, it might make sense to separate the two, by creating a control message to kick
+  off Handoff. This would enable the client to init kexs before handing off, the verification that
+  the NMS message has been sent would have to be done when the HO control message is received.
+  See commit 8a3fceac56ca32266fe3a37f11987931f2819713 for some commented out code.
+
+* Assumption is made that first global request success/failure message sent by server back to client
+  after client has sent NMS is the response to the NMS. This assumption should hold given that 1) all
+  other Global requests (than NMS) have been disabled on client, and 2) that proxy should not be sending
+  further Global Requests to Server once connection has been established.
+
+* Current UX decision: 3 choices on initial approval:
+  * Approve this command for this user/server pair from this client once, now
+  * Approve all commands for this user/server pair from this client moving forward
+  * Deny current request
+  Other choices might include approve this one command moving forward, and not having the user/server-client
+  entity be the basic entity for which policy decisions are "saved."
+
+* Current question as to how to do client/agent auth (proving client identity to policy). Our solution is
+  to use the initial ssh session establishment as proof. That is implement our agent as a wrapper around
+  ssh running on the machine. Sessions established between client and agent are 1-to-1 with instances of
+  our solution running on the agent machine, thereby allowing the agent to map sockets (through which the
+  client is connected) to given clients. We wrap so the agent can store the username/host used to connect
+  to the client when the ssh connection is established.
+  * Alternatives might use a single instance of our code running on the client and storing sockets to
+    user/server mappings to lookup current client making a request.
+  * We might also choose to use key-pairs to authenticate clients to the agent. Advantage of a key pair
+    per user per client (vs a key pair per client) is that while root user on untrusted server can still
+    spoof any user, other users can't spoof. Gain here of our solution over ssh-agent is 1) specific
+    server approval, 2) command approval, 3) machine emitting command approval (still prone to spoofing
+    from root user on that machine, but still a major gain. Untrusted machines can't cross abuse permissions
+    -- see above point). We chose not to use this approach as it introduces a whole question of key management
+    on clients, which seems a major drawback to using this (avoiding this is the point of the agent in the first
+    place).
