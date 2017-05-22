@@ -379,14 +379,28 @@ func main() {
 	serverOut.mu.Unlock()
 
 	sshClient.RequestKeyChange()
-	if err = <-handoffComplete; err != nil {
-		log.Printf("Handoff failed: %s", err)
-		return
-	}
-	if debugClient {
-		log.Printf("Handoff Complete")
-	}
+	errChan := make(chan error)
+	go func() {
+		errChan <- sshClient.Wait()
+	}()
 
+	select {
+	case err = <-handoffComplete:
+		if err != nil {
+			log.Printf("Handoff failed: %s", err)
+			return
+		}
+		if debugClient {
+			log.Printf("Handoff Complete")
+		}
+	case err = <-errChan:
+		if debugClient {
+			log.Printf("Command finished before handoff: %s", err)
+		}
+		if err != nil {
+			log.Printf("Connection error: %s", err)
+		}
+	}
 	err = session.resume()
 	if err != nil {
 		log.Printf("Command failed: %s", err)
