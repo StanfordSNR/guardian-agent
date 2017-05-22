@@ -19,7 +19,7 @@ import (
 	"golang.org/x/crypto/ssh/knownhosts"
 )
 
-type policyStore map[[32]byte]bool
+type policyStore map[ssh.PolicyKey]ssh.PolicyScope
 
 func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, pc *ssh.Policy) error {
 	var auths []ssh.AuthMethod
@@ -107,6 +107,21 @@ func main() {
 	}
 }
 
+func policyInStore(store policyStore, policy ssh.Policy) bool{
+	scope, ok := store[policy.GetPolicyKey()]
+	if ok {
+		if scope.AllCommands {
+			return true
+		}
+		for _, v := range scope.Commands {
+			if policy.Command == v {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func handleConnection(master net.Conn, store policyStore) {
 	log.Printf("New incoming connection from %s", master.RemoteAddr())
 
@@ -138,9 +153,7 @@ func handleConnection(master net.Conn, store policyStore) {
 
 	policy := ssh.NewPolicy(execReq.User, execReq.Command, execReq.Server)
 
-	// to be changed if per command approval enabled
-	_, policyStored := store[policy.GetPolicyID()]
-	if !policyStored {
+	if !policyInStore(store, *policy) {
 		err = policy.AskForApproval(store)
 		if err != nil {
 			log.Printf("Request denied: %s", err)
