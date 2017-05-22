@@ -17,7 +17,6 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
-	"golang.org/x/crypto/sha3"
 )
 
 type policyStore map[[32]byte]bool
