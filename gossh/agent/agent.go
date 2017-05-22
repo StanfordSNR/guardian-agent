@@ -22,10 +22,6 @@ import (
 
 type policyStore map[[32]byte]bool
 
-func hashPolicyID(pc *ssh.Policy) (hash [32]byte) {
-	return sha3.Sum256([]byte(pc.User + "||" + pc.Server))
-} 
-
 func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, pc *ssh.Policy) error {
 	var auths []ssh.AuthMethod
 	aconn, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK"))
@@ -144,9 +140,9 @@ func handleConnection(master net.Conn, store policyStore) {
 	policy := ssh.NewPolicy(execReq.User, execReq.Command, execReq.Server)
 
 	// to be changed if per command approval enabled
-	_, policyStored := store[hashPolicyID(policy)]
+	_, policyStored := store[policy.GetPolicyID()]
 	if !policyStored {
-		err = policy.AskForApproval(store, hashPolicyID)
+		err = policy.AskForApproval(store)
 		if err != nil {
 			log.Printf("Request denied: %s", err)
 			common.WriteControlPacket(control, common.MsgExecutionDenied, []byte{})
