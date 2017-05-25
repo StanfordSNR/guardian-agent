@@ -3,11 +3,20 @@ package store
 import (
     "encoding/json"
     "os"
+    "os/user"
+    "log"
+    "fmt"
 )
 
 // TODO: figure out format
 // TODO: work out synchronization for multiple agents per client?
-const configLocation = "~/.ssh/agent_policies"
+func configLocation() (error, string) {
+    usr, err := user.Current()
+    if err != nil {
+        return err, ""
+    }
+    return nil, fmt.Sprintf("%s/.ssh/agent_policies", usr.HomeDir)
+}
 
 type PolicyKey struct {
     cUser   string // this is the connecting user (making request)
@@ -15,21 +24,21 @@ type PolicyKey struct {
 }
 
 type RequestedPerm struct {
-// the agent creds the client wants to user
+// the agent creds the client wants to use
     AUser   string
     AServer string
 }
 
 type PolicyScope map[RequestedPerm]PolicyRule
-    
+
 type PolicyRule struct {
     AllCommands     bool
     Commands        []string
 }
 
-type storageUnit struct {
-    key     PolicyKey
-    scope   PolicyScope
+type ScopedStore struct {
+    Key     PolicyKey
+    Scope   PolicyScope
 }
 
 // type policyStore map[PolicyKey]PolicyScope
@@ -37,6 +46,11 @@ type storageUnit struct {
 func load() (err error, store map[PolicyKey]PolicyScope) {
 
     store = make(map[PolicyKey]PolicyScope)
+    err, configLocation := configLocation()
+    if err != nil {
+        return
+    }
+
     file, err := os.Open(configLocation)
     if os.IsNotExist(err) {
         // initialize new one
@@ -46,54 +60,60 @@ func load() (err error, store map[PolicyKey]PolicyScope) {
     }
     dec := json.NewDecoder(file)
 
-    var su storageUnit
-    for err := dec.Decode(&su); err == nil; err = dec.Decode(&su) {
-        store[su.key] = su.scope
+    var scoS ScopedStore
+    for err := dec.Decode(&scoS); err == nil; err = dec.Decode(&scoS) {
+        store[scoS.Key] = scoS.Scope
     }
     file.Close()
 
     return nil, store
 }
 
-func ScopedStore(cUser string, cClient string) (err error, scope PolicyScope) {
+func FetchScopedStore(cUser string, cClient string) (err error, scopedStore ScopedStore) {
+    key := PolicyKey{cUser: cUser, cClient: cClient}
     err, store := load()
+    log.Printf("err %s\nstore %s", err, store)
     if err != nil {
-        return err, nil
+        scope := make(PolicyScope)
+        return err, ScopedStore{Key: key, Scope: scope}
     }
-    scope = store[PolicyKey{cUser: cUser, cClient: cClient}]
+    scope := store[key]
     if scope == nil {
         scope = make(PolicyScope)
     }
-    return nil, scope
+    return nil, ScopedStore{Key: key, Scope: scope}
 }
 
-func Store(cUser string, cClient string, scopedStore PolicyScope) (err error) {
-
+func (scoS *ScopedStore) Save() error {
     // read first to only edit client's part.
     err, store := load()
     if err != nil {
-        return
+        return err
     }
 
-    // double IO with load... refactor?
-    file, err := os.Open(configLocation)
+    err, configLocation := configLocation()
     if err != nil {
-        if os.IsNotExist(err) {
-            file, err := os.Create(configLocation)
-            if err != nil {
-                file.Close()
-                return err
-            }
-        } else {
+        return err
+    }
+
+    var file *os.File
+    if _, err = os.Stat(configLocation); err == nil {
+        file, err = os.Open(configLocation)
+        if err != nil {
+            return err
+        } 
+    } else {
+        file, err = os.Create(configLocation) 
+        if err != nil {
             return err
         }
     }
 
-    store[PolicyKey {cUser: cUser, cClient: cClient}] = scopedStore
+    store[scoS.Key] = scoS.Scope
 
     enc := json.NewEncoder(file)
     for k, v := range store {    
-        err = enc.Encode(storageUnit{key: k, scope: v})        
+        err = enc.Encode(ScopedStore{Key: k, Scope: v})        
         if err != nil {
             return err
         }

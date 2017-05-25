@@ -92,7 +92,7 @@ func main() {
 	defer masterListener.Close()
 
 	// (dimakogan) plug in here
-	err, scopedStore := store.ScopedStore("placeholderUser", "placeholderClient")
+	err, scopedStore := store.FetchScopedStore("placeholderUser", "placeholderClient")
 	if err != nil {
 		log.Fatalf("Failed to load policies from disk: %s", err)
 	}
@@ -107,8 +107,9 @@ func main() {
 	}
 }
 
-func policyInScope(scopedStore store.PolicyScope, policy ssh.Policy) bool{
-	rule, ok := scopedStore[policy.GetPolicyKey()]
+func policyInScope(scopedStore store.ScopedStore, policy ssh.Policy) bool{
+	rule, ok := scopedStore.Scope[policy.GetPolicyKey()]
+	log.Printf("rule: %s\nok:%s", rule, ok)
 	if ok {
 		if rule.AllCommands {
 			return true
@@ -122,7 +123,7 @@ func policyInScope(scopedStore store.PolicyScope, policy ssh.Policy) bool{
 	return false
 }
 
-func handleConnection(master net.Conn, scopedStore store.PolicyScope) {
+func handleConnection(master net.Conn, scopedStore store.ScopedStore) {
 	log.Printf("New incoming connection from %s", master.RemoteAddr())
 
 	ymux, err := yamux.Server(master, nil)
