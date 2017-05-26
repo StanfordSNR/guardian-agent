@@ -8,12 +8,10 @@ import (
     "fmt"
     "bytes"
     "strings"
-    // "github.com/antonholmquist/jason"
     "io/ioutil"
     "github.com/bitly/go-simplejson"
 )
 
-// TODO: figure out format
 // TODO: work out synchronization for multiple agents per client?
 func configLocation() (error, string) {
     usr, err := user.Current()
@@ -26,25 +24,25 @@ func configLocation() (error, string) {
 type PolicyKey struct {
     CUser   string `json:"CUser"`// this is the connecting user (making request)
     CClient string `json:"CClient"`// this is the connecting client/machine (making request)
-} // `json:"PolicyKey"`
+}
 
 type RequestedPerm struct {
 // the agent creds the client wants to use
     AUser   string `json:"AUser"`
     AServer string `json:"AServer"`
-} // `json:"RequestedPerm"`
+}
 
 type PolicyRule struct {
     AllCommands     bool        `json:"AllCommands"`
     Commands        []string    `json:"Commands"`
-} // `json:"PolicyRule"`
+}
 
 type PolicyScope map[RequestedPerm]PolicyRule
 
 type ScopedStore struct {
     PolicyKey     PolicyKey     `json:"PolicyKey"`
     PolicyScope   PolicyScope   `json:"PolicyScope"`
-} // `json:"ScopedStore"`
+}
 
 // type policyStore map[PolicyKey]PolicyScope
 
@@ -231,7 +229,11 @@ func (scoS *ScopedStore) Save() error {
     }
     storeBuf.Write([]byte("}]"))
     
-    err = enc.Encode(storeBuf.Bytes())//json.RawMessage(storeBuf.String()))
+    // (dimakogan) - first one will hash, second more efficient, can also prettify with simplejson - delete your file if you change
+    // 1
+    // err = enc.Encode(storeBuf.Bytes())
+    // 2
+    err = enc.Encode(json.RawMessage(storeBuf.String()))
 
     if err != nil {
         return err
