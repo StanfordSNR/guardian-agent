@@ -17,9 +17,8 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
+	"github.com/dimakogan/ssh/gossh/store"
 )
-
-type policyStore map[[32]byte]bool
 
 func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, pc *ssh.Policy) error {
 	var auths []ssh.AuthMethod
@@ -92,10 +91,11 @@ func main() {
 	}
 	defer masterListener.Close()
 
-	// can and should be refactored if we do one agent in all rather than one per connection
-	// Similarly, if we choose to enable a mode to remember per command approval (rather than all commands)
-	// should make it map to an array of commands, with a wildcard to signify all.
-	store := make(policyStore)
+	// (dimakogan) plug in here
+	err, scopedStore := store.FetchScopedStore("placeholderUser", "placeholderClient")
+	if err != nil {
+		log.Fatalf("Failed to load policies from disk: %s", err)
+	}
 
 	for {
 		master, err := masterListener.Accept()
@@ -103,11 +103,27 @@ func main() {
 			log.Printf("Failed to accept connection: %s", err)
 			continue
 		}
-		handleConnection(master, store)
+		handleConnection(master, scopedStore)
 	}
 }
 
-func handleConnection(master net.Conn, store policyStore) {
+func policyInScope(scopedStore store.ScopedStore, policy ssh.Policy) bool{
+	rule, ok := scopedStore.PolicyScope[policy.GetKey()]
+	log.Printf("rule: %s\nok:%s", rule, ok)
+	if ok {
+		if rule.AllCommands {
+			return true
+		}
+		for _, storedCommand := range rule.Commands {
+			if policy.Command == storedCommand {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func handleConnection(master net.Conn, scopedStore store.ScopedStore) {
 	log.Printf("New incoming connection from %s", master.RemoteAddr())
 
 	ymux, err := yamux.Server(master, nil)
@@ -138,10 +154,8 @@ func handleConnection(master net.Conn, store policyStore) {
 
 	policy := ssh.NewPolicy(execReq.User, execReq.Command, execReq.Server)
 
-	// to be changed if per command approval enabled
-	_, policyStored := store[policy.GetPolicyID()]
-	if !policyStored {
-		err = policy.AskForApproval(store)
+	if !policyInScope(scopedStore, *policy) {
+		err = policy.AskForApproval(scopedStore)
 		if err != nil {
 			log.Printf("Request denied: %s", err)
 			common.WriteControlPacket(control, common.MsgExecutionDenied, []byte{})
