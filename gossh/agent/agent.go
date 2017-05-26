@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"flag"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
@@ -13,16 +14,13 @@ import (
 
 	"path"
 
-	"fmt"
-
 	"github.com/dimakogan/ssh/gossh/common"
+	"github.com/dimakogan/ssh/gossh/store"
 	"github.com/hashicorp/yamux"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
 )
-
-type policyStore map[[32]byte]bool
 
 func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, pc *ssh.Policy) error {
 	var auths []ssh.AuthMethod
@@ -86,7 +84,6 @@ func askPassPrompt(text string) (reply string, err error) {
 	out, err := cmd.Output()
 	return string(out), err
 }
-
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	f, err := os.OpenFile("/tmp/ssh-guard.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
@@ -107,10 +104,6 @@ func main() {
 	defer masterListener.Close()
 	defer os.Remove(bindAddr)
 
-	// can and should be refactored if we do one agent in all rather than one per connection
-	// Similarly, if we choose to enable a mode to remember per command approval (rather than all commands)
-	// should make it map to an array of commands, with a wildcard to signify all.
-	store := make(policyStore)
 	args := flag.Args()
 	promptFunc := terminalPrompt
 	stopped := false
@@ -152,13 +145,30 @@ func main() {
 			log.Fatalf("Failed to accept connection: %s", err)
 			return
 		}
-		if err = handleConnection(master, store, promptFunc); err != nil {
+		if err = handleConnection(master, promptFunc); err != nil {
 			log.Printf("Error handling connection: %s", err)
 		}
 	}
+
 }
 
-func handleConnection(master net.Conn, store policyStore, promptFunc ssh.PromptUserFunc) error {
+func policyInScope(scopedStore store.ScopedStore, policy ssh.Policy) bool {
+	rule, ok := scopedStore.PolicyScope[policy.GetKey()]
+	log.Printf("rule: %s\nok:%s", rule, ok)
+	if ok {
+		if rule.AllCommands {
+			return true
+		}
+		for _, storedCommand := range rule.Commands {
+			if policy.Command == storedCommand {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func handleConnection(master net.Conn, promptFunc ssh.PromptUserFunc) error {
 	log.Printf("New incoming connection")
 	policy := ssh.Policy{Prompt: promptFunc}
 
@@ -211,9 +221,10 @@ func handleConnection(master net.Conn, store policyStore, promptFunc ssh.PromptU
 	}
 
 	// to be changed if per command approval enabled
-	_, policyStored := store[policy.GetPolicyID()]
-	if !policyStored {
-		err = policy.AskForApproval(store)
+	err, scopedStore := store.FetchScopedStore(policy.ClientUsername, policy.ClientHostname)
+
+	if !policyInScope(scopedStore, policy) {
+		err = policy.AskForApproval(scopedStore)
 		if err != nil {
 			common.WriteControlPacket(master, common.MsgExecutionDenied, []byte{})
 			return fmt.Errorf("Request denied: %s", err)
