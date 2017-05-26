@@ -108,7 +108,7 @@ func main() {
 }
 
 func policyInScope(scopedStore store.ScopedStore, policy ssh.Policy) bool{
-	rule, ok := scopedStore.Scope[policy.GetPolicyKey()]
+	rule, ok := scopedStore.PolicyScope[policy.GetKey()]
 	log.Printf("rule: %s\nok:%s", rule, ok)
 	if ok {
 		if rule.AllCommands {
