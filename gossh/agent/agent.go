@@ -1,16 +1,19 @@
 package main
 
 import (
+	"bufio"
 	"flag"
-	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"os/user"
-	"path/filepath"
 
 	"path"
+
+	"fmt"
 
 	"github.com/dimakogan/ssh/gossh/common"
 	"github.com/hashicorp/yamux"
@@ -72,108 +75,187 @@ func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, pc *ssh.Po
 	return common.WriteControlPacket(control, common.MsgHandoffComplete, packet)
 }
 
+func terminalPrompt(text string) (reply string, err error) {
+	fmt.Print(text)
+	reader := bufio.NewReader(os.Stdin)
+	return reader.ReadString('\n')
+}
+
+func askPassPrompt(text string) (reply string, err error) {
+	cmd := exec.Command("ssh-askpass", text)
+	out, err := cmd.Output()
+	return string(out), err
+}
+
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	var cport int
-	flag.IntVar(&cport, "l", 2345, "Proxy port to listen on.")
-
-	curuser, err := user.Current()
+	f, err := os.OpenFile("/tmp/ssh-guard.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
-		log.Fatalf("Failed to get current user: %s", err)
+		log.Fatalf("error opening file: %v", err)
 	}
-	var knownHosts string
-	flag.StringVar(&knownHosts, "known_hosts", filepath.Join(curuser.HomeDir, ".ssh/known_hosts"), "known hosts to verify against")
-
+	defer f.Close()
+	log.SetOutput(f)
+	var bindAddr string
+	flag.StringVar(&bindAddr, "a", "", "Address to bind to. Default is /tmp/ssh-guard-XXXXXXXXXX/agent.<ppid>")
 	flag.Parse()
-
-	masterListener, err := net.Listen("tcp", fmt.Sprintf(":%d", cport))
+	masterListener, bindAddr, err := common.CreateSocket(bindAddr)
 	if err != nil {
-		log.Fatalf("Failed to listen on control port %d: %s", cport, err)
+		log.Fatalf("Failed to listen on socket %s: %s", bindAddr, err)
 	}
+
+	log.Printf("Listening on: %s", bindAddr)
 	defer masterListener.Close()
+	defer os.Remove(bindAddr)
 
 	// can and should be refactored if we do one agent in all rather than one per connection
 	// Similarly, if we choose to enable a mode to remember per command approval (rather than all commands)
 	// should make it map to an array of commands, with a wildcard to signify all.
 	store := make(policyStore)
+	args := flag.Args()
+	promptFunc := terminalPrompt
+	stopped := false
+
+	if flag.NArg() > 0 {
+		child := exec.Command(args[0], args[1:]...)
+		env, err := common.ReplaceSSHAuthSockEnv(os.Environ(), bindAddr)
+		if err != nil {
+			log.Fatal(err)
+		}
+		child.Env = env
+
+		child.Stdin = os.Stdin
+		child.Stdout = os.Stdout
+		child.Stderr = os.Stderr
+		if err = child.Start(); err != nil {
+			log.Fatalf("Failed to execute child process: %s", err)
+		}
+		go func() {
+			if err = child.Wait(); err != nil {
+				log.Fatalf("Failed to execute child process: %s", err)
+			}
+			stopped = true
+			masterListener.Close()
+		}()
+		promptFunc = askPassPrompt
+	} else {
+		fmt.Printf("SSH_AUTH_SOCK=%s; export SSH_AUTH_SOCK;\n", bindAddr)
+		fmt.Printf("SSH_AGENT_PID=%d; export SSH_AGENT_PID;\n", os.Getpid())
+		fmt.Printf("echo Agent pid %d;\n", os.Getpid())
+	}
 
 	for {
 		master, err := masterListener.Accept()
-		if err != nil {
-			log.Printf("Failed to accept connection: %s", err)
-			continue
+		if stopped {
+			break
 		}
-		handleConnection(master, store)
+		if err != nil {
+			log.Fatalf("Failed to accept connection: %s", err)
+			return
+		}
+		if err = handleConnection(master, store, promptFunc); err != nil {
+			log.Printf("Error handling connection: %s", err)
+		}
 	}
 }
 
-func handleConnection(master net.Conn, store policyStore) {
-	log.Printf("New incoming connection from %s", master.RemoteAddr())
+func handleConnection(master net.Conn, store policyStore, promptFunc ssh.PromptUserFunc) error {
+	log.Printf("New incoming connection")
+	policy := ssh.Policy{Prompt: promptFunc}
 
-	ymux, err := yamux.Server(master, nil)
-	if err != nil {
-		log.Printf("Failed to start ymux: %s", err)
-		master.Close()
-		return
+	var err error
+	gotRequest := false
+	for err == nil && !gotRequest {
+		msgNum, payload, err := common.ReadControlPacket(master)
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("Failed to read control packet: %s", err)
+		}
+		switch msgNum {
+		case common.MsgAgentForwardingNotice:
+			notice := new(common.AgentForwardingNoticeMsg)
+			if err := ssh.Unmarshal(payload, notice); err != nil {
+				return fmt.Errorf("Failed to unmarshal AgentForwardingNoticeMsg: %s", err)
+			}
+			policy.ClientHostname = notice.Hostname
+			policy.ClientPort = notice.Port
+			policy.ClientUsername = notice.Username
+		case common.MsgExecutionRequest:
+			execReq := new(common.ExecutionRequestMessage)
+			if err = ssh.Unmarshal(payload, execReq); err != nil {
+				return fmt.Errorf("Failed to unmarshal ExecutionRequestMessage: %s", err)
+			}
+			policy.User = execReq.User
+			policy.Command = execReq.Command
+			policy.Server = execReq.Server
+			gotRequest = true
+		default:
+			realAgent, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK"))
+			if err != nil {
+				log.Fatal(err)
+			}
+			go func() {
+				io.Copy(master, realAgent)
+				master.Close()
+			}()
+			if err = common.WriteControlPacket(realAgent, msgNum, payload); err != nil {
+				return err
+			}
+			go func() {
+				io.Copy(realAgent, master)
+				realAgent.Close()
+			}()
+			return nil
+		}
 	}
-	defer ymux.Close()
-
-	control, err := ymux.Accept()
-	if err != nil {
-		log.Printf("Failed to accept control stream: %s", err)
-		return
-	}
-	defer control.Close()
-
-	msgNum, payload, err := common.ReadControlPacket(control)
-	if msgNum != common.MsgExecutionRequest {
-		log.Printf("Unexpected control message: %d (expecting MsgExecutionRequest)", msgNum)
-		return
-	}
-	execReq := new(common.ExecutionRequestMessage)
-	if err = ssh.Unmarshal(payload, execReq); err != nil {
-		log.Printf("Failed to unmarshal ExecutionRequestMessage: %s", err)
-		return
-	}
-
-	policy := ssh.NewPolicy(execReq.User, execReq.Command, execReq.Server)
 
 	// to be changed if per command approval enabled
 	_, policyStored := store[policy.GetPolicyID()]
 	if !policyStored {
 		err = policy.AskForApproval(store)
 		if err != nil {
-			log.Printf("Request denied: %s", err)
-			common.WriteControlPacket(control, common.MsgExecutionDenied, []byte{})
-			return
+			common.WriteControlPacket(master, common.MsgExecutionDenied, []byte{})
+			return fmt.Errorf("Request denied: %s", err)
 		}
 	}
-	common.WriteControlPacket(control, common.MsgExecutionApproved, []byte{})
+	common.WriteControlPacket(master, common.MsgExecutionApproved, []byte{})
+
+	ymux, err := yamux.Server(master, nil)
+	if err != nil {
+		master.Close()
+		return fmt.Errorf("Failed to start ymux: %s", err)
+	}
+	defer ymux.Close()
+
+	control, err := ymux.Accept()
+	if err != nil {
+		return fmt.Errorf("Failed to accept control stream: %s", err)
+	}
+	defer control.Close()
 
 	sshData, err := ymux.Accept()
 	if err != nil {
-		log.Printf("Failed to accept data stream: %s", err)
-		return
+		return fmt.Errorf("Failed to accept data stream: %s", err)
 	}
 	defer sshData.Close()
 
 	transport, err := ymux.Accept()
 	if err != nil {
-		log.Printf("Failed to get transport stream: %s", err)
-		return
+		return fmt.Errorf("Failed to get transport stream: %s", err)
 	}
 	defer transport.Close()
 
-	err = proxySSH(sshData, transport, control, policy)
+	err = proxySSH(sshData, transport, control, &policy)
 	transport.Close()
 	sshData.Close()
 	control.Close()
 	// Wait for client to close master connection
 	ioutil.ReadAll(master)
 
-	if err == nil {
-		log.Printf("Session complete OK")
-	} else {
-		log.Printf("Proxy session finished with error: %s", err)
+	if err != nil {
+		return fmt.Errorf("Proxy session finished with error: %s", err)
 	}
+	log.Print("Session complete OK")
+	return nil
 }

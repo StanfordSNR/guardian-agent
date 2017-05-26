@@ -3,12 +3,23 @@ package common
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"log"
 	"net"
+	"strings"
 )
 
 const debugCommon = false
+
+const MsgAgentForwardingNotice = 206
+
+type AgentForwardingNoticeMsg struct {
+	Hostname string
+	IP       string
+	Port     uint32
+	Username string
+}
 
 const MsgExecutionRequest = 1
 const MsgExecutionRequestAccept = 2
@@ -17,6 +28,8 @@ const MsgHandoffComplete = 10
 
 const MsgExecutionDenied = 0
 const MsgExecutionApproved = 1
+
+const MaxAgentPacketSize = 10 * 1024
 
 type ExecutionApprovedMessage struct {
 }
@@ -96,4 +109,18 @@ func WriteControlPacket(w io.Writer, msgNum byte, payload []byte) error {
 	}
 	_, err := w.Write(payload)
 	return err
+}
+
+func ReplaceSSHAuthSockEnv(env []string, newVal string) (newEnv []string, err error) {
+	i := 0
+	for i = 0; i < len(env); i++ {
+		if strings.HasPrefix(env[i], "SSH_AUTH_SOCK") {
+			break
+		}
+	}
+	if i == len(env) {
+		return nil, fmt.Errorf("No SSH_AUTH_SOCKET defined.")
+	}
+	env[i] = fmt.Sprintf("%s=%s", "SSH_AUTH_SOCK", newVal)
+	return env, nil
 }

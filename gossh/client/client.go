@@ -114,10 +114,6 @@ func main() {
 
 	var port int
 	flag.IntVar(&port, "p", 22, "Port to connect to on the remote host.")
-	var pxAddr string
-	flag.StringVar(&pxAddr, "px", "127.0.0.1", "Address for the ssh proxy.")
-	var pxPort int
-	flag.IntVar(&pxPort, "c", 2345, "Proxy port to connect to.")
 
 	flag.Parse()
 	if flag.NArg() < 1 {
@@ -152,9 +148,30 @@ func main() {
 	}
 	defer serverConn.Close()
 
-	master, err := net.Dial("tcp", fmt.Sprintf("%s:%d", pxAddr, pxPort))
+	guardSock := os.Getenv("SSH_AUTH_SOCK")
+	master, err := net.Dial("unix", guardSock)
 	if err != nil {
-		log.Printf("Failed to connect to proxy  %s:%d: %s", pxAddr, pxPort, err)
+		log.Printf("Failed to connect to proxy  %s %s", guardSock, err)
+	}
+
+	execReq := common.ExecutionRequestMessage{
+		User:    username,
+		Command: cmd,
+		Server:  fmt.Sprintf("%s:%d", host, port),
+	}
+
+	execReqPacket := ssh.Marshal(execReq)
+	err = common.WriteControlPacket(master, common.MsgExecutionRequest, execReqPacket)
+	if err != nil {
+		log.Printf("Failed to send MsgExecutionRequest to proxy\n")
+		return
+	}
+
+	// Wait for response before opening data connection
+	msgNum, _, err := common.ReadControlPacket(master)
+	if msgNum != common.MsgExecutionApproved {
+		log.Printf("Execution was denied")
+		return
 	}
 
 	ymux, err := yamux.Client(master, nil)
@@ -164,26 +181,6 @@ func main() {
 		log.Printf("Failed to get control stream: %s", err)
 	}
 	defer control.Close()
-
-	execReq := common.ExecutionRequestMessage{
-		User:    username,
-		Command: cmd,
-		Server:  fmt.Sprintf("%s:%d", host, port),
-	}
-
-	execReqPacket := ssh.Marshal(execReq)
-	err = common.WriteControlPacket(control, common.MsgExecutionRequest, execReqPacket)
-	if err != nil {
-		log.Printf("Failed to send MsgExecutionRequest to proxy\n")
-		return
-	}
-
-	// Wait for response before opening data connection
-	msgNum, _, err := common.ReadControlPacket(control)
-	if msgNum != common.MsgExecutionApproved {
-		log.Printf("Execution was denied")
-		return
-	}
 	// Proceed with approval
 	proxyData, err := ymux.Open()
 	if err != nil {
@@ -324,7 +321,6 @@ func main() {
 		}()
 	}
 
-	addr = "127.0.0.1:222"
 	config := ssh.ClientConfig{
 		Config: ssh.Config{
 			KexCallback: kexCallback,
