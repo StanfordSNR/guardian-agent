@@ -68,7 +68,13 @@ func load() (err error, store map[PolicyKey]PolicyScope) {
         return
     }
 
-    for _, policy := range policies {
+    store = parseStore(store, policies)
+
+    return nil, store
+}
+
+func parseStore(inStore map[PolicyKey]PolicyScope, policies []interface{}) (store map[PolicyKey]PolicyScope) {
+        for _, policy := range policies {
         policy := policy.(map[string]interface{})
 
         var pk PolicyKey
@@ -122,10 +128,10 @@ func load() (err error, store map[PolicyKey]PolicyScope) {
                     ps[rp] = pr
                 }
             }
-            store[pk] = ps
+            inStore[pk] = ps
         }
     }
-    return nil, store
+    return inStore
 }
 
 func FetchScopedStore(cUser string, cClient string) (err error, scopedStore ScopedStore) {
