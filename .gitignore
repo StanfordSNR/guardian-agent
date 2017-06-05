@@ -2,4 +2,5 @@
 *.gitmodules
 /gossh/agent/agent
 /gossh/agent/agent.exe
+/gossh/sshfwdstub/sshfwdstub
 *.go~

@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"io"
 	"log"
 	"os"
 	"os/exec"
+	"os/user"
+	"path"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
@@ -13,8 +16,15 @@ import (
 
 	"strconv"
 
+	"fmt"
+
+	"io/ioutil"
+
 	"github.com/dimakogan/ssh/gossh/common"
 )
+
+// RemoteStubName is the name of the stub executable on the remote machine.
+const RemoteStubName = "~/sshfwdstub"
 
 func main() {
 	dryRun := exec.Command("ssh", append([]string{"-G"}, os.Args[1:]...)...)
@@ -45,39 +55,67 @@ func main() {
 		}
 	}
 
-	var bindAddr string
+	curUser, err := user.Current()
+	if err != nil {
+		log.Fatalf("Failed to get current user: %s", err)
+	}
+
+	remoteStub := exec.Command("ssh", append(os.Args[1:], "-M", "-S", path.Join(curUser.HomeDir, ".ssh", "%C.master"), RemoteStubName)...)
+	remoteStdErr, err := remoteStub.StderrPipe()
+	if err != nil {
+		log.Fatalf("Failed to get ssh stderr: %s", err)
+	}
+	remoteStdOut, err := remoteStub.StdoutPipe()
+	if err != nil {
+		log.Fatalf("Failed to get ssh stdout: %s", err)
+	}
+	remoteStdIn, err := remoteStub.StdinPipe()
+	if err != nil {
+		log.Fatalf("Failed to get ssh stdin: %s", err)
+	}
+
+	err = remoteStub.Start()
+	if err != nil {
+		var stdErr []byte
+		if ee, ok := err.(*exec.ExitError); ok {
+			stdErr = ee.Stderr
+		}
+		os.Stderr.Write(stdErr)
+		fullStdErr, _ := ioutil.ReadAll(remoteStdErr)
+		log.Fatalf("Failed to run SSH: %s\n%s", err, fullStdErr)
+	}
+	go io.Copy(os.Stderr, remoteStdErr)
+	stubReader := bufio.NewReader(remoteStdOut)
+	remoteSocket, _, err := stubReader.ReadLine()
+	if err != nil {
+		allErr, _ := ioutil.ReadAll(remoteStdErr)
+		log.Fatalf("Failed to read remote socket path from stub: %s\n%s", err, allErr)
+	}
+
 	listener, bindAddr, err := common.CreateSocket("")
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to listen on socket %s: %s", bindAddr, err)
 	}
+
 	defer listener.Close()
+	defer os.Remove(bindAddr)
 
-	child := exec.Command("ssh", append([]string{"-o ExitOnForwardFailure yes", "-A"}, os.Args[1:]...)...)
-	env, err := common.ReplaceSSHAuthSockEnv(os.Environ(), bindAddr)
+	child := exec.Command("ssh", append([]string{"-o ExitOnForwardFailure yes", "-vvv", "-S", path.Join(curUser.HomeDir, ".ssh", "%C.master"), "-O", "forward", fmt.Sprintf("-R %s:%s", string(remoteSocket), bindAddr)}, os.Args[1:]...)...)
+	out, err := child.Output()
 	if err != nil {
-		log.Fatal(err)
-	}
-	child.Env = env
-
-	child.Stdin = os.Stdin
-	child.Stdout = os.Stdout
-	child.Stderr = os.Stderr
-	stopped := false
-	if err = child.Start(); err != nil {
-		log.Fatalf("Failed to execute child process: %s", err)
-	}
-	go func() {
-		if err = child.Wait(); err != nil {
-			log.Printf("Failed to execute child process: %s", err)
+		var stdErr []byte
+		if ee, ok := err.(*exec.ExitError); ok {
+			stdErr = ee.Stderr
 		}
-		stopped = true
-		listener.Close()
-	}()
+		os.Stderr.Write(stdErr)
+		log.Fatalf("Failed to run SSH forwarding: %s\n%s", err, out)
+	}
+	_, err = fmt.Fprintln(remoteStdIn, "start")
+	if err != nil {
+		log.Fatalf("Failed to ack forwarding: %s", err)
+	}
 	for err == nil {
 		client, err := listener.Accept()
-		if stopped {
-			break
-		}
 		if err != nil {
 			log.Fatal(err)
 		}
