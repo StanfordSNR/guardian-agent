@@ -144,14 +144,14 @@ func main() {
 	addr := fmt.Sprintf("%s:%d", host, port)
 	serverConn, err := net.Dial("tcp", addr)
 	if err != nil {
-		log.Printf("Failed to connect to %s:%d: %s", host, port, err)
+		log.Fatalf("Failed to connect to %s:%d: %s", host, port, err)
 	}
 	defer serverConn.Close()
 
 	guardSock := os.Getenv("SSH_AUTH_SOCK")
 	master, err := net.Dial("unix", guardSock)
 	if err != nil {
-		log.Printf("Failed to connect to proxy  %s %s", guardSock, err)
+		log.Fatalf("Failed to connect to proxy: %s", err)
 	}
 
 	execReq := common.ExecutionRequestMessage{
@@ -163,34 +163,32 @@ func main() {
 	execReqPacket := ssh.Marshal(execReq)
 	err = common.WriteControlPacket(master, common.MsgExecutionRequest, execReqPacket)
 	if err != nil {
-		log.Printf("Failed to send MsgExecutionRequest to proxy\n")
-		return
+		log.Fatalf("Failed to send MsgExecutionRequest to proxy: %s", err)
 	}
 
 	// Wait for response before opening data connection
 	msgNum, _, err := common.ReadControlPacket(master)
 	if msgNum != common.MsgExecutionApproved {
-		log.Printf("Execution was denied")
-		return
+		log.Fatalf("Execution was denied: %s", err)
 	}
 
 	ymux, err := yamux.Client(master, nil)
 	defer ymux.Close()
 	control, err := ymux.Open()
 	if err != nil {
-		log.Printf("Failed to get control stream: %s", err)
+		log.Fatalf("Failed to get control stream: %s", err)
 	}
 	defer control.Close()
 	// Proceed with approval
 	proxyData, err := ymux.Open()
 	if err != nil {
-		log.Printf("Failed to get data stream: %s", err)
+		log.Fatalf("Failed to get data stream: %s", err)
 	}
 	defer proxyData.Close()
 
 	pt, err := ymux.Open()
 	if err != nil {
-		log.Printf("Failed to get transport stream: %s", err)
+		log.Fatalf("Failed to get transport stream: %s", err)
 	}
 	proxyTransport := common.CustomConn{Conn: pt}
 	defer proxyTransport.Close()
