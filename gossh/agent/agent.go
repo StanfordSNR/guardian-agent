@@ -15,14 +15,14 @@ import (
 	"path"
 
 	"github.com/dimakogan/ssh/gossh/common"
-	"github.com/dimakogan/ssh/gossh/store"
+	"github.com/dimakogan/ssh/gossh/policy"
 	"github.com/hashicorp/yamux"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
 )
 
-func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, pc *ssh.Policy) error {
+func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, fil *ssh.Filter) error {
 	var auths []ssh.AuthMethod
 	aconn, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK"))
 	if err != nil {
@@ -44,13 +44,13 @@ func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, pc *ssh.Po
 		return err
 	}
 	clientConfig := &ssh.ClientConfig{
-		User:            pc.User,
+		User:            fil.Scope.ClientUsername,
 		HostKeyCallback: kh,
 		Auth:            auths,
 	}
 
 	meteredConnToServer := common.CustomConn{Conn: toServer}
-	proxy, err := ssh.NewProxyConn(pc.Server, toClient, &meteredConnToServer, clientConfig, pc.FilterClientPacket, pc.FilterServerPacket)
+	proxy, err := ssh.NewProxyConn(fil.Scope.ServiceHostname, toClient, &meteredConnToServer, clientConfig, fil.FilterClientPacket, fil.FilterServerPacket)
 	if err != nil {
 		return err
 	}
@@ -84,6 +84,7 @@ func askPassPrompt(text string) (reply string, err error) {
 	out, err := cmd.Output()
 	return string(out), err
 }
+
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	f, err := os.OpenFile("/tmp/ssh-guard.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
@@ -152,25 +153,10 @@ func main() {
 
 }
 
-func policyInScope(scopedStore store.ScopedStore, policy ssh.Policy) bool {
-	rule, ok := scopedStore.PolicyScope[policy.GetKey()]
-	log.Printf("rule: %s\nok:%s", rule, ok)
-	if ok {
-		if rule.AllCommands {
-			return true
-		}
-		for _, storedCommand := range rule.Commands {
-			if policy.Command == storedCommand {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 func handleConnection(master net.Conn, promptFunc ssh.PromptUserFunc) error {
 	log.Printf("New incoming connection")
-	policy := ssh.Policy{Prompt: promptFunc}
+	filter := ssh.Filter{Prompt: promptFunc}
+	scope := policy.Scope{}
 
 	var err error
 	gotRequest := false
@@ -190,17 +176,17 @@ func handleConnection(master net.Conn, promptFunc ssh.PromptUserFunc) error {
 			if err := ssh.Unmarshal(payload, notice); err != nil {
 				return fmt.Errorf("Failed to unmarshal AgentForwardingNoticeMsg: %s", err)
 			}
-			policy.ClientHostname = notice.Hostname
-			policy.ClientPort = notice.Port
-			policy.ClientUsername = notice.Username
+			scope.ClientHostname = notice.Hostname
+			scope.ClientPort = notice.Port
+			scope.ClientUsername = notice.Username
 		case common.MsgExecutionRequest:
 			execReq := new(common.ExecutionRequestMessage)
 			if err = ssh.Unmarshal(payload, execReq); err != nil {
 				return fmt.Errorf("Failed to unmarshal ExecutionRequestMessage: %s", err)
 			}
-			policy.User = execReq.User
-			policy.Command = execReq.Command
-			policy.Server = execReq.Server
+			scope.ServiceUsername = execReq.User
+			filter.Command = execReq.Command
+			scope.ServiceHostname = execReq.Server
 			gotRequest = true
 		default:
 			if remote {
@@ -225,12 +211,11 @@ func handleConnection(master net.Conn, promptFunc ssh.PromptUserFunc) error {
 			return nil
 		}
 	}
+	
+	filter.Scope = scope
 
-	// to be changed if per command approval enabled
-	err, scopedStore := store.FetchScopedStore(policy.ClientUsername, policy.ClientHostname)
-
-	if !policyInScope(scopedStore, policy) {
-		err = policy.AskForApproval(scopedStore)
+	if !filter.Approved() {
+		err = filter.AskForApproval()
 		if err != nil {
 			common.WriteControlPacket(master, common.MsgExecutionDenied, []byte{})
 			return fmt.Errorf("Request denied: %s", err)
@@ -263,7 +248,7 @@ func handleConnection(master net.Conn, promptFunc ssh.PromptUserFunc) error {
 	}
 	defer transport.Close()
 
-	err = proxySSH(sshData, transport, control, &policy)
+	err = proxySSH(sshData, transport, control, &filter)
 	transport.Close()
 	sshData.Close()
 	control.Close()
