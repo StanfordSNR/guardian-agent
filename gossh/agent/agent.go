@@ -174,6 +174,7 @@ func handleConnection(master net.Conn, promptFunc ssh.PromptUserFunc) error {
 
 	var err error
 	gotRequest := false
+	remote := false
 	for err == nil && !gotRequest {
 		msgNum, payload, err := common.ReadControlPacket(master)
 		if err == io.EOF {
@@ -184,6 +185,7 @@ func handleConnection(master net.Conn, promptFunc ssh.PromptUserFunc) error {
 		}
 		switch msgNum {
 		case common.MsgAgentForwardingNotice:
+			remote = true
 			notice := new(common.AgentForwardingNoticeMsg)
 			if err := ssh.Unmarshal(payload, notice); err != nil {
 				return fmt.Errorf("Failed to unmarshal AgentForwardingNoticeMsg: %s", err)
@@ -201,6 +203,10 @@ func handleConnection(master net.Conn, promptFunc ssh.PromptUserFunc) error {
 			policy.Server = execReq.Server
 			gotRequest = true
 		default:
+			if remote {
+				common.WriteControlPacket(master, common.MsgAgentFailure, []byte{})
+				return fmt.Errorf("Denied raw remote access to SSH_AUTH_SOCK ")
+			}
 			realAgent, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK"))
 			if err != nil {
 				log.Fatal(err)

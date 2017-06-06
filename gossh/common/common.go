@@ -12,6 +12,10 @@ import (
 
 const debugCommon = false
 
+const MsgAgentFailure = 5
+
+type AgentFailureMsg struct{}
+
 const MsgAgentForwardingNotice = 206
 
 type AgentForwardingNoticeMsg struct {
