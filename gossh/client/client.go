@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"os/user"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +27,31 @@ type commandExecution struct {
 	stdin   io.WriteCloser
 	stdout  io.Reader
 	stderr  io.Reader
+}
+
+func SockFullPath() (string, error) {
+	sockPath := os.Getenv("SSH_AUTH_SOCK")
+	if sockPath != "" {
+		if _, err := os.Stat(sockPath); err == nil {
+			return sockPath, nil
+		}
+	}
+	dir := os.Getenv("XDG_RUNTIME_DIR")
+	if dir != "" {
+		sockPath = path.Join(dir, common.AgentGuardSockName)
+		if _, err := os.Stat(sockPath); err == nil {
+			return sockPath, nil
+		}
+	}
+	curuser, err := user.Current()
+	if err != nil {
+		return "", err
+	}
+	sockPath = path.Join(curuser.HomeDir, ".ssh", common.AgentGuardSockName)
+	if _, err := os.Stat(sockPath); err != nil {
+		return sockPath, nil
+	}
+	return "", os.ErrNotExist
 }
 
 func startCommand(conn *ssh.Client, cmd string) (cmdExec *commandExecution, err error) {
@@ -148,11 +174,15 @@ func main() {
 	}
 	defer serverConn.Close()
 
-	guardSock := os.Getenv("SSH_AUTH_SOCK")
+	guardSock, err := SockFullPath()
+	if err != nil {
+		log.Fatalf("Failed to find ssh auth socket: %s", err)
+	}
 	master, err := net.Dial("unix", guardSock)
 	if err != nil {
 		log.Fatalf("Failed to connect to proxy: %s", err)
 	}
+	defer master.Close()
 
 	execReq := common.ExecutionRequestMessage{
 		User:    username,

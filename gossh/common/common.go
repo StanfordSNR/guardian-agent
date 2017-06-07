@@ -12,6 +12,8 @@ import (
 
 const debugCommon = false
 
+const AgentGuardSockName = "agent-guard.sock"
+
 const MsgAgentFailure = 5
 
 type AgentFailureMsg struct{}

@@ -8,14 +8,16 @@ import (
 	"os"
 	"os/user"
 	"path"
+
+	"github.com/dimakogan/ssh/gossh/common"
 )
 
 func main() {
-	dir, err := ioutil.TempDir("", "ssh-agent-guard")
+	tmpDir, err := ioutil.TempDir("", "ssh-agent-guard")
 	if err != nil {
 		log.Fatalf("Failed to created tempdir: %s", err)
 	}
-	tempSocket := path.Join(dir, fmt.Sprintf("guard.%d", os.Getpid()))
+	tempSocket := path.Join(tmpDir, fmt.Sprintf("guard.%d", os.Getpid()))
 	_, err = fmt.Println(tempSocket)
 	if err != nil {
 		log.Fatalf("Failed to write temp dir location: %s", err)
@@ -28,11 +30,18 @@ func main() {
 	if _, err := os.Stat(tempSocket); os.IsNotExist(err) {
 		log.Fatalf("Failed to find forwarded socket: %s", err)
 	}
-	curUser, err := user.Current()
-	if err != nil {
-		log.Fatalf("Failed to get current user: %s", err)
+
+	permanentSocket := ""
+	dir := os.Getenv("XDG_RUNTIME_DIR")
+	if dir != "" {
+		permanentSocket = path.Join(dir, common.AgentGuardSockName)
+	} else {
+		curuser, err := user.Current()
+		if err != nil {
+			log.Fatalf("Failed to get user homedir: %s", err)
+		}
+		permanentSocket = path.Join(curuser.HomeDir, ".ssh", common.AgentGuardSockName)
 	}
-	permanentSocket := path.Join(curUser.HomeDir, ".ssh", "agent-guard.sock")
 	if _, err := os.Stat(permanentSocket); err == nil {
 		os.Remove(permanentSocket)
 	}
