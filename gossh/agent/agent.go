@@ -82,6 +82,7 @@ func terminalPrompt(text string) (reply string, err error) {
 func askPassPrompt(text string) (reply string, err error) {
 	cmd := exec.Command("ssh-askpass", text)
 	out, err := cmd.Output()
+	fmt.Printf("askpass: %s", out)
 	return string(out), err
 }
 
@@ -130,11 +131,17 @@ func main() {
 			stopped = true
 			masterListener.Close()
 		}()
-		promptFunc = askPassPrompt
+		// promptFunc = askPassPrompt
 	} else {
 		fmt.Printf("SSH_AUTH_SOCK=%s; export SSH_AUTH_SOCK;\n", bindAddr)
 		fmt.Printf("SSH_AGENT_PID=%d; export SSH_AGENT_PID;\n", os.Getpid())
 		fmt.Printf("echo Agent pid %d;\n", os.Getpid())
+	}
+
+	// get policy store
+	err, store := policy.LoadStore()
+	if err != nil {
+		log.Fatalf("Failed to load store: %s", err)
 	}
 
 	for {
@@ -146,21 +153,21 @@ func main() {
 			log.Fatalf("Failed to accept connection: %s", err)
 			return
 		}
-		if err = handleConnection(master, promptFunc); err != nil {
+		if err = handleConnection(master, store, promptFunc); err != nil {
 			log.Printf("Error handling connection: %s", err)
 		}
 	}
 
 }
 
-func handleConnection(master net.Conn, promptFunc ssh.PromptUserFunc) error {
+func handleConnection(master net.Conn, store policy.Store, promptFunc ssh.PromptUserFunc) error {
 	log.Printf("New incoming connection")
-	filter := ssh.Filter{Prompt: promptFunc}
-	scope := policy.Scope{}
 
 	var err error
 	gotRequest := false
 	remote := false
+	var fCH, fCU, fSH, fSU, fC string
+	var fCP uint32
 	for err == nil && !gotRequest {
 		msgNum, payload, err := common.ReadControlPacket(master)
 		if err == io.EOF {
@@ -176,17 +183,17 @@ func handleConnection(master net.Conn, promptFunc ssh.PromptUserFunc) error {
 			if err := ssh.Unmarshal(payload, notice); err != nil {
 				return fmt.Errorf("Failed to unmarshal AgentForwardingNoticeMsg: %s", err)
 			}
-			scope.ClientHostname = notice.Hostname
-			scope.ClientPort = notice.Port
-			scope.ClientUsername = notice.Username
+			fCH = notice.Hostname
+			fCP = notice.Port
+			fCU = notice.Username
 		case common.MsgExecutionRequest:
 			execReq := new(common.ExecutionRequestMessage)
 			if err = ssh.Unmarshal(payload, execReq); err != nil {
 				return fmt.Errorf("Failed to unmarshal ExecutionRequestMessage: %s", err)
 			}
-			scope.ServiceUsername = execReq.User
-			filter.Command = execReq.Command
-			scope.ServiceHostname = execReq.Server
+			fSU = execReq.User
+			fC = execReq.Command
+			fSH = execReq.Server
 			gotRequest = true
 		default:
 			if remote {
@@ -212,14 +219,11 @@ func handleConnection(master net.Conn, promptFunc ssh.PromptUserFunc) error {
 		}
 	}
 	
-	filter.Scope = scope
+	filter := ssh.NewFilter(policy.Scope{fCU, fCH, fCP, fSU, fSH}, store, fC, promptFunc)
 
-	if !filter.Approved() {
-		err = filter.AskForApproval()
-		if err != nil {
-			common.WriteControlPacket(master, common.MsgExecutionDenied, []byte{})
-			return fmt.Errorf("Request denied: %s", err)
-		}
+	if err = filter.IsApproved(); err != nil {
+		common.WriteControlPacket(master, common.MsgExecutionDenied, []byte{})
+		return fmt.Errorf("Request denied: %s", err)
 	}
 	common.WriteControlPacket(master, common.MsgExecutionApproved, []byte{})
 
@@ -248,7 +252,7 @@ func handleConnection(master net.Conn, promptFunc ssh.PromptUserFunc) error {
 	}
 	defer transport.Close()
 
-	err = proxySSH(sshData, transport, control, &filter)
+	err = proxySSH(sshData, transport, control, filter)
 	transport.Close()
 	sshData.Close()
 	control.Close()

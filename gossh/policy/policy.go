@@ -1,21 +1,16 @@
 package policy
 
 import (
-    // "encoding/json"
-    // "os"
+    "encoding/json"
+    "os"
     "os/user"
-    // "log"
     "fmt"
     // "bytes"
-    // "strings"
     "io/ioutil"
-    // "github.com/bitly/go-simplejson"
-    "sync"
+    // "sync"
     "log"
-    "errors"
 )
 
-// TODO: work out synchronization for multiple agents per client?
 func configLocation() (error, string) {
     usr, err := user.Current()
     if err != nil {
@@ -25,7 +20,7 @@ func configLocation() (error, string) {
 }
 
 type Scope struct {
-    ClientUsername  string `json:"ClientUsername"`// this is the connecting user (making request)
+    ClientUsername  string `json:"ClientUsername"`
     ClientHostname  string `json:"ClientHostname"`
     ClientPort      uint32 `json:"ClientPort"`
     ServiceUsername string `json:"ServiceUsername"`
@@ -37,49 +32,29 @@ type Rule struct {
     Commands        []string `json:"Commands"`
 }
 
-type policyStore map[Scope]Rule
+type Store map[Scope]Rule
 
-var store policyStore
-var once sync.Once
-
-func pStore() (err error, store policyStore) {
-    err = nil
-    once.Do(func() {
-        store = make(policyStore)
-        err = store.load()
-    })
-
-    if err != nil {
-        log.Printf("Failed to load store from file!")
-    }
-    
-    return err, store
+type storageEntry struct {
+    PolicyScope Scope `json:"Scope"`
+    PolicyRule  Rule  `json:"Rule"`
 }
+type persistentStore []storageEntry
 
-func (sc *Scope) Approved(reqCommand string) bool {
-    // further refactor by making singleton store loaded by agent on start, saved periodically and on shutdown
-    _, store := pStore()
-    
-    storedRule, ok := store[*sc]
-
-    if ok {
-        if storedRule.AllCommands {
+func (rule Rule) IsApproved(reqCommand string) bool {
+    if rule.AllCommands {
+        return true
+    }
+    for _, storedCommand := range rule.Commands {
+        if reqCommand == storedCommand {
             return true
-        }
-        for _, storedCommand := range storedRule.Commands {
-            if reqCommand == storedCommand {
-                return true
-            }
         }
     }
     return false
 }
 
-func (sc *Scope) GetRule() Rule {
+func (store Store) GetRule(scope Scope) Rule {
     
-    _, store := pStore()
-
-    storedRule, ok := store[*sc]
+    storedRule, ok := store[scope]
     if ok {
         return storedRule
     } else {
@@ -87,203 +62,105 @@ func (sc *Scope) GetRule() Rule {
     }
 }
 
-func (sc *Scope) SetRule(rule Rule) (err error) {
-
-    _, store := pStore()
-
-    store[*sc] = rule
+func (store Store) SetAllAllowedInScope(sc Scope) (err error) {
+    rule := store.GetRule(sc)
+    rule.AllCommands = true
+    store[sc] = rule
     err = store.save()
+
     return
 }
 
-func (store *policyStore) load() (err error) {
+func (store Store) SetCommandAllowedInScope(sc Scope, newCommand string) (err error) {
+    rule := store.GetRule(sc)
+    for _, command := range rule.Commands {
+        if command == newCommand {
+            return
+        }
+    }
+    rule.Commands = append(rule.Commands, newCommand)
+    err = store.save()
 
+    return
+}
+
+func LoadStore() (err error, store Store) {
+
+    err = nil
+    store = make(Store)
+    err = store.load()
+    
+    return err, store
+}
+
+func (store *Store) load() (err error) {
     err, configLocation := configLocation()
     if err != nil {
         return
     }
-    //data, err :=
-    _, err = ioutil.ReadFile(configLocation)
+
+    data, err := ioutil.ReadFile(configLocation)
+
+    file, err := os.Open(configLocation)
     if err != nil {
-        return errors.New("Couldn't read store file.")
+        log.Panic(err)
     }
 
-    // val, err := simplejson.NewJson(data)
+    dec := json.NewDecoder(file)
 
-    // // let's build it back up
-    // policies, err := val.Array()
-    // if err != nil {
-    //     return
-    // }
-
-    // store = parseStore(store, policies)
-
+    if err = dec.Decode(&store); err != nil {
+        fmt.Println("err is %s", err)
+        return err
+    }
     return nil
 }
 
-// func parseStore(inStore map[PolicyKey]PolicyScope, policies []interface{}) (store map[PolicyKey]PolicyScope) {
-//         for _, policy := range policies {
-//         policy := policy.(map[string]interface{})
+func (store *Store) save() (err error) {
 
-//         var pk PolicyKey
-//         ps := make(PolicyScope)
-//         for k, v := range policy {
+    err, configLocation := configLocation()
+    if err != nil {
+        return err
+    }
 
-//             if k == "PolicyKey" {
-//                 var cU, cC string
-//                 v := v.(map[string]interface{})
-//                 for kv, vv := range v {
-//                     if kv == "CUser" {
-//                         cU = vv.(string)
-//                     } else if kv == "CClient" {
-//                         cC = vv.(string)
-//                     }
-//                 }
-//                 pk = PolicyKey{CUser: cU, CClient: cC}
-//             } else if k == "PolicyScope" {
-//                 for _, scope := range v.([]interface{}) {
-//                     scope := scope.(map[string]interface{})
-//                     aC := false
-//                     var cmds []string
-//                     var aU, aS string
-//                     var pr PolicyRule
-//                     var rp RequestedPerm
-//                     for sk, sv := range scope {
-//                         sv := sv.(map[string]interface{})
-//                         if sk == "PolicyRule" {
-//                             for svk, svv := range sv {
-//                                 if svk == "AllCommands" {
-//                                     aC = svv.(bool) 
-//                                 } else if svk == "Commands" {
-//                                     svv := svv.([]interface {})
-//                                     for _, cmd := range svv {
-//                                         cmds = append(cmds, cmd.(string))
-//                                     }
-//                                 }
-//                             }
-//                         } else if sk == "RequestedPerm" {
-//                             for svk, svv := range sv {
-//                                 if svk == "AUser" {
-//                                     aU = svv.(string)
-//                                 } else if svk == "AServer" {
-//                                     aS = svv.(string)
-//                                 }
-//                             }
-//                         }
-//                     }
-//                     rp = RequestedPerm{AUser: aU, AServer: aS}
-//                     pr = PolicyRule{AllCommands: aC, Commands: cmds}
-//                     ps[rp] = pr
-//                 }
-//             }
-//             inStore[pk] = ps
-//         }
-//     }
-//     return inStore
-// }
+    var file *os.File
+    file, err = os.OpenFile(configLocation, os.O_WRONLY|os.O_CREATE, 0600)
+    if err != nil {
+        return err
+    } 
 
-func (store *policyStore) save() (err error) {
+    enc := json.NewEncoder(file)
+    if err := enc.Encode(&store); err != nil {
+        return err
+    }
     return nil
 }
-// func (scoS *ScopedStore) Save() error {
-//     // read first to only edit client's part.
-//     err, store := load()
-//     if err != nil {
-//         return err
-//     }
 
-//     err, configLocation := configLocation()
-//     if err != nil {
-//         return err
-//     }
+func (store *Store) MarshalJSON() ([]byte, error) {
+    fmt.Println("weird bug 1 %s", store)
+    ps := make(persistentStore, 1)
+    for k, v := range *store {
+        ps = append(ps, storageEntry{PolicyScope: k, PolicyRule: v})
+    }
+    val, err := json.Marshal(ps)
 
-//     var file *os.File
-//     if _, err = os.Stat(configLocation); err == nil {
-//         file, err = os.OpenFile(configLocation, os.O_RDWR|os.O_CREATE, 0700)
-//         if err != nil {
-//             return err
-//         } 
-//     } else {
-//         file, err = os.Create(configLocation) 
-//         if err != nil {
-//             return err
-//         }
-//     }
+    if err != nil {
+        return nil, err
+    }
+    fmt.Println("Weird bug2 %s", string(val))
+ 
+    return val, nil
+}
 
-//     store[scoS.PolicyKey] = scoS.PolicyScope
+func (store Store) UnmarshalJSON(b []byte) error {
+    tmpStore := make(persistentStore, 1)
+    err := json.Unmarshal(b, &tmpStore)
 
-// /* Goal is: 
-// [{
-//     "PolicyKey": {
-//         "CUser": "placeholderUser",
-//         "CClient": "placeholderClient"
-//     },
-//     "PolicyScope": [{
-//         "RequestedPerm": {
-//             "AUser": "Henri",
-//             "AServer": "127.0.0.1:22"
-//         },
-//         "PolicyRule": {
-//             "AllCommands": true,
-//             "Commands": []
-//         }
-//     }]
-// }]
-// */
-//     enc := json.NewEncoder(file)
+    if err != nil {
+        return err
+    }
+    for _, v := range tmpStore {
+        store[v.PolicyScope] = v.PolicyRule
+    }
 
-//     // FUCK golang json library
-//     var storeBuf bytes.Buffer
-//     storeMax := len(store)
-//     storeCount := 0
-//     storeBuf.Write([]byte("["))
-//     for key, scope := range store {
-//         jsonKey := []byte(fmt.Sprintf(`{"PolicyKey": {"CUser": "%s", "CClient": "%s"}`, key.CUser, key.CClient))
-
-//         var scopeBuf bytes.Buffer
-//         scopeMax := len(scope)
-//         scopeCount := 0
-//         scopeBuf.Write([]byte(`"PolicyScope": [`))
-//         for perm, rule := range scope {
-//             jsonPerm := []byte(fmt.Sprintf(`{"RequestedPerm": {"AUser": "%s", "AServer": "%s"}`, perm.AUser, perm.AServer))
-
-//             var jsonCommands string
-//             if len(rule.Commands) > 0 {
-//                 jsonCommands = fmt.Sprintf("%s", strings.Join(rule.Commands, `", "`))
-//             } else {
-//                 jsonCommands = ""
-//             }
-//             jsonRule := []byte(fmt.Sprintf(`"PolicyRule": {"AllCommands": %t, "Commands":[%s]}`, rule.AllCommands, jsonCommands))
-
-//             jsonScope := []byte(fmt.Sprintf(`%s, %s`, jsonPerm, jsonRule))
-//             scopeBuf.Write(jsonScope)
-//             scopeCount ++
-//             if scopeCount < scopeMax {
-//                 scopeBuf.Write([]byte("}, "))
-//             }
-//         }
-//         scopeBuf.Write([]byte("}]"))
-//         storeBuf.Write([]byte(fmt.Sprintf("%s, %s", jsonKey, scopeBuf.String())))
-//         storeCount ++
-//         if storeCount < storeMax {
-//             storeBuf.Write([]byte("}, "))
-//         }
-//     }
-//     storeBuf.Write([]byte("}]"))
-    
-//     // (dimakogan) - first one will hash, second more efficient, can also prettify with simplejson - delete your file if you change
-//     // 1
-//     // err = enc.Encode(storeBuf.Bytes())
-//     // 2
-//     err = enc.Encode(json.RawMessage(storeBuf.String()))
-
-//     if err != nil {
-//         return err
-//     }
-
-//     file.Close()
-//     return nil
-// }
-
-
-
+    return nil
+}
