@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -44,7 +43,7 @@ func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, fil *ssh.F
 		return err
 	}
 	clientConfig := &ssh.ClientConfig{
-		User:            fil.Scope.ClientUsername,
+		User:            fil.Scope.ServiceUsername,
 		HostKeyCallback: kh,
 		Auth:            auths,
 	}
@@ -151,11 +150,11 @@ func main() {
 		}
 		if err != nil {
 			log.Fatalf("Failed to accept connection: %s", err)
-			return
 		}
 		if err = handleConnection(master, store, promptFunc); err != nil {
 			log.Printf("Error handling connection: %s", err)
 		}
+		master.Close()
 	}
 
 }
@@ -206,7 +205,6 @@ func handleConnection(master net.Conn, store policy.Store, promptFunc ssh.Prompt
 			}
 			go func() {
 				io.Copy(master, realAgent)
-				master.Close()
 			}()
 			if err = common.WriteControlPacket(realAgent, msgNum, payload); err != nil {
 				return err
@@ -218,7 +216,7 @@ func handleConnection(master net.Conn, store policy.Store, promptFunc ssh.Prompt
 			return nil
 		}
 	}
-	
+
 	filter := ssh.NewFilter(policy.Scope{fCU, fCH, fCP, fSU, fSH}, store, fC, promptFunc)
 
 	if err = filter.IsApproved(); err != nil {
@@ -229,7 +227,6 @@ func handleConnection(master net.Conn, store policy.Store, promptFunc ssh.Prompt
 
 	ymux, err := yamux.Server(master, nil)
 	if err != nil {
-		master.Close()
 		return fmt.Errorf("Failed to start ymux: %s", err)
 	}
 	defer ymux.Close()
@@ -256,8 +253,6 @@ func handleConnection(master net.Conn, store policy.Store, promptFunc ssh.Prompt
 	transport.Close()
 	sshData.Close()
 	control.Close()
-	// Wait for client to close master connection
-	ioutil.ReadAll(master)
 
 	if err != nil {
 		return fmt.Errorf("Proxy session finished with error: %s", err)

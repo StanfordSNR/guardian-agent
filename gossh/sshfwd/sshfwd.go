@@ -26,6 +26,8 @@ import (
 // RemoteStubName is the name of the stub executable on the remote machine.
 const RemoteStubName = "~/sshfwdstub"
 
+const debugSSHFwd = false
+
 func main() {
 	dryRun := exec.Command("ssh", append([]string{"-G"}, os.Args[1:]...)...)
 	fullConfig, err := dryRun.Output()
@@ -133,6 +135,9 @@ func main() {
 		}
 		go func() {
 			io.Copy(realAgent, client)
+			if debugSSHFwd {
+				log.Printf("Finished copying from client to real agent.")
+			}
 			realAgent.Close()
 		}()
 	}
