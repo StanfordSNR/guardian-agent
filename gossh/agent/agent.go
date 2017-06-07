@@ -139,7 +139,7 @@ func main() {
 	}
 
 	// get policy store
-	err, store := policy.LoadStore()
+	err, store := policy.NewStore()
 	if err != nil {
 		log.Fatalf("Failed to load store: %s", err)
 	}

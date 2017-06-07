@@ -5,9 +5,7 @@ import (
     "os"
     "os/user"
     "fmt"
-    // "bytes"
-    "io/ioutil"
-    // "sync"
+    "sync"
     "log"
 )
 
@@ -33,12 +31,24 @@ type Rule struct {
 }
 
 type Store map[Scope]Rule
+var mutex sync.RWMutex
 
 type storageEntry struct {
     PolicyScope Scope `json:"Scope"`
     PolicyRule  Rule  `json:"Rule"`
 }
 type persistentStore []storageEntry
+
+func NewStore() (err error, store Store) {
+
+    err = nil
+    store = make(Store)
+    err = store.load()
+    
+    mutex = sync.RWMutex{}
+
+    return err, store
+}
 
 func (rule Rule) IsApproved(reqCommand string) bool {
     if rule.AllCommands {
@@ -54,7 +64,9 @@ func (rule Rule) IsApproved(reqCommand string) bool {
 
 func (store Store) GetRule(scope Scope) Rule {
     
+    mutex.RLock()
     storedRule, ok := store[scope]
+    mutex.RUnlock()
     if ok {
         return storedRule
     } else {
@@ -65,7 +77,9 @@ func (store Store) GetRule(scope Scope) Rule {
 func (store Store) SetAllAllowedInScope(sc Scope) (err error) {
     rule := store.GetRule(sc)
     rule.AllCommands = true
+    mutex.Lock()
     store[sc] = rule
+    mutex.Unlock()
     err = store.save()
 
     return
@@ -79,18 +93,12 @@ func (store Store) SetCommandAllowedInScope(sc Scope, newCommand string) (err er
         }
     }
     rule.Commands = append(rule.Commands, newCommand)
+    mutex.Lock()
+    store[sc] = rule
+    mutex.Unlock()
     err = store.save()
 
     return
-}
-
-func LoadStore() (err error, store Store) {
-
-    err = nil
-    store = make(Store)
-    err = store.load()
-    
-    return err, store
 }
 
 func (store *Store) load() (err error) {
@@ -99,18 +107,18 @@ func (store *Store) load() (err error) {
         return
     }
 
-    data, err := ioutil.ReadFile(configLocation)
-
-    file, err := os.Open(configLocation)
+    file, err := os.OpenFile(configLocation, os.O_RDONLY|os.O_CREATE, 0600)
     if err != nil {
         log.Panic(err)
     }
+    defer file.Close()
 
     dec := json.NewDecoder(file)
-
-    if err = dec.Decode(&store); err != nil {
-        fmt.Println("err is %s", err)
-        return err
+    if dec.More() {
+        if err = dec.Decode(&store); err != nil {
+            fmt.Println("err is %s", err)
+            return err
+        }
     }
     return nil
 }
@@ -122,13 +130,15 @@ func (store *Store) save() (err error) {
         return err
     }
 
-    var file *os.File
-    file, err = os.OpenFile(configLocation, os.O_WRONLY|os.O_CREATE, 0600)
+    file, err := os.OpenFile(configLocation, os.O_WRONLY|os.O_CREATE, 0600)
     if err != nil {
         return err
     } 
+    defer file.Close()
 
     enc := json.NewEncoder(file)
+    mutex.Lock()
+    defer mutex.Unlock()
     if err := enc.Encode(&store); err != nil {
         return err
     }
