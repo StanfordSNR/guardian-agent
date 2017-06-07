@@ -138,12 +138,18 @@ func main() {
 		log.Fatalf("Failed to get current user: %s", err)
 	}
 
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: %s [-p port] [user@]hostname [command]\n", os.Args[0])
+		flag.PrintDefaults()
+	}
+
 	var port int
 	flag.IntVar(&port, "p", 22, "Port to connect to on the remote host.")
 
 	flag.Parse()
 	if flag.NArg() < 1 {
-		log.Fatalf("Usage: %s hostname", os.Args[0])
+		flag.Usage()
+		os.Exit(1)
 	}
 
 	userHost := strings.Split(flag.Args()[0], "@")
