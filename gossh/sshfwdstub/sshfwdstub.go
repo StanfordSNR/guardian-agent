@@ -42,10 +42,12 @@ func main() {
 		}
 		permanentSocket = path.Join(curuser.HomeDir, ".ssh", common.AgentGuardSockName)
 	}
+
 	if _, err := os.Stat(permanentSocket); err == nil {
 		os.Remove(permanentSocket)
 	}
-	if os.Symlink(tempSocket, permanentSocket) != nil {
+	
+	if err := os.Symlink(tempSocket, permanentSocket); err != nil {
 		log.Fatalf("Failed to create symlink %s --> %s : %s", permanentSocket, tempSocket, err)
 	}
 	reader.ReadLine()

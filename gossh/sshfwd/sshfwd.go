@@ -56,7 +56,6 @@ func main() {
 			}
 		}
 	}
-
 	curUser, err := user.Current()
 	if err != nil {
 		log.Fatalf("Failed to get current user: %s", err)
@@ -86,6 +85,7 @@ func main() {
 		fullStdErr, _ := ioutil.ReadAll(remoteStdErr)
 		log.Fatalf("Failed to run SSH: %s\n%s", err, fullStdErr)
 	}
+
 	go io.Copy(os.Stderr, remoteStdErr)
 	stubReader := bufio.NewReader(remoteStdOut)
 	remoteSocket, _, err := stubReader.ReadLine()
@@ -112,10 +112,12 @@ func main() {
 		os.Stderr.Write(stdErr)
 		log.Fatalf("Failed to run SSH forwarding: %s\n%s", err, out)
 	}
+
 	_, err = fmt.Fprintln(remoteStdIn, "start")
 	if err != nil {
 		log.Fatalf("Failed to ack forwarding: %s", err)
 	}
+
 	for err == nil {
 		client, err := listener.Accept()
 		if err != nil {
