@@ -48,7 +48,7 @@ func SockFullPath() (string, error) {
 		return "", err
 	}
 	sockPath = path.Join(curuser.HomeDir, ".ssh", common.AgentGuardSockName)
-	if _, err := os.Stat(sockPath); err != nil {
+	if _, err := os.Stat(sockPath); err == nil {
 		return sockPath, nil
 	}
 	return "", os.ErrNotExist
