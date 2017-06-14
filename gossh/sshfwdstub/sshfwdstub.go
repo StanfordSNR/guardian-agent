@@ -46,7 +46,7 @@ func main() {
 	if _, err := os.Stat(permanentSocket); err == nil {
 		os.Remove(permanentSocket)
 	}
-	
+
 	if err := os.Symlink(tempSocket, permanentSocket); err != nil {
 		log.Fatalf("Failed to create symlink %s --> %s : %s", permanentSocket, tempSocket, err)
 	}

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"io"
@@ -19,6 +18,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
+	"golang.org/x/crypto/ssh/terminal"
 )
 
 func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, fil *ssh.Filter) error {
@@ -72,19 +72,6 @@ func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, fil *ssh.F
 	return common.WriteControlPacket(control, common.MsgHandoffComplete, packet)
 }
 
-func terminalPrompt(text string) (reply string, err error) {
-	fmt.Print(text)
-	reader := bufio.NewReader(os.Stdin)
-	return reader.ReadString('\n')
-}
-
-func askPassPrompt(text string) (reply string, err error) {
-	cmd := exec.Command("ssh-askpass", text)
-	out, err := cmd.Output()
-	fmt.Printf("askpass: %s", out)
-	return string(out), err
-}
-
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	f, err := os.OpenFile("/tmp/ssh-guard.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
@@ -106,7 +93,7 @@ func main() {
 	defer os.Remove(bindAddr)
 
 	args := flag.Args()
-	promptFunc := terminalPrompt
+	promptFunc := common.TerminalPrompt
 	stopped := false
 
 	if flag.NArg() > 0 {
@@ -130,11 +117,18 @@ func main() {
 			stopped = true
 			masterListener.Close()
 		}()
-		// promptFunc = askPassPrompt
+		// if running a child, use askpass
+		promptFunc = common.AskPassPrompt
 	} else {
-		fmt.Printf("SSH_AUTH_SOCK=%s; export SSH_AUTH_SOCK;\n", bindAddr)
-		fmt.Printf("SSH_AGENT_PID=%d; export SSH_AGENT_PID;\n", os.Getpid())
-		fmt.Printf("echo Agent pid %d;\n", os.Getpid())
+		// fmt.Printf("SSH_AUTH_SOCK=%s; export SSH_AUTH_SOCK;\n", bindAddr)
+		// fmt.Printf("SSH_AGENT_PID=%d; export SSH_AGENT_PID;\n", os.Getpid())
+		// fmt.Printf("echo Agent pid %d;\n", os.Getpid())
+		// if not check what stdin is
+		if terminal.IsTerminal(int(os.Stdin.Fd())) {
+			promptFunc = common.FancyTerminalPrompt
+		} else {
+			promptFunc = common.AskPassPrompt
+		}
 	}
 
 	// get policy store
@@ -159,7 +153,7 @@ func main() {
 
 }
 
-func handleConnection(master net.Conn, store policy.Store, promptFunc ssh.PromptUserFunc) error {
+func handleConnection(master net.Conn, store policy.Store, promptFunc common.PromptUserFunc) error {
 	log.Printf("New incoming connection")
 
 	var err error
