@@ -22,7 +22,7 @@ func formatPrompt(params Prompt) (formattedPrompt string) {
 	var buf bytes.Buffer
 	buf.WriteString(params.Question)
 	for i, v := range params.Choices {
-		buf.WriteString(fmt.Sprintf("\n\t%d) %s", i+1, v))
+		buf.WriteString(fmt.Sprintf("\n    %d) %s", i+1, v))
 	}
 	buf.WriteString("\n\nAnswer (enter a number): ")
 	formattedPrompt = buf.String()
