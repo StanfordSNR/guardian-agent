@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-type PromptUserFunc func(prompt Prompt) (string, error)
+type PromptUserFunc func(prompt Prompt) (int, error)
 
 type Prompt struct {
 	Question string
@@ -24,23 +24,23 @@ func formatPrompt(params Prompt) (formattedPrompt string) {
 	for i, v := range params.Choices {
 		buf.WriteString(fmt.Sprintf("\n\t%d) %s", i+1, v))
 	}
-	buf.WriteString("\n? Answer: ")
+	buf.WriteString("\n\nAnswer (enter a number): ")
 	formattedPrompt = buf.String()
 	return
 }
 
-func TerminalPrompt(params Prompt) (reply string, err error) {
-	reply = "-1"
-	iReply, convErr := strconv.Atoi(reply)
+func TerminalPrompt(params Prompt) (reply int, err error) {
+	reply = -1
+    var convErr error
 
-	for convErr != nil || iReply <= 0 || iReply > len(params.Choices) {
+	for convErr != nil || reply <= 0 || reply > len(params.Choices) {
 		fmt.Print(formatPrompt(params))
 		reader := bufio.NewReader(os.Stdin)
-		reply, err = reader.ReadString('\n')
-		iReply, convErr = strconv.Atoi(strings.TrimSpace(reply))
+		sReply, _ := reader.ReadString('\n')
+		reply, convErr = strconv.Atoi(strings.TrimSpace(sReply))
 	}
 
-	return
+	return 
 }
 
 func MapToChoice(vs []string) []i.Choice {
@@ -51,7 +51,7 @@ func MapToChoice(vs []string) []i.Choice {
 	return vsm
 }
 
-func FancyTerminalPrompt(params Prompt) (reply string, err error) {
+func FancyTerminalPrompt(params Prompt) (reply int, err error) {
 	var resp int64
 
 	i.Run(&i.Interact{
@@ -70,23 +70,23 @@ func FancyTerminalPrompt(params Prompt) (reply string, err error) {
 			},
 		},
 	})
-	reply = strconv.Itoa(int(resp))
+	reply = int(resp)
 	return
 }
 
-func AskPassPrompt(params Prompt) (reply string, err error) {
-	reply = "-1"
-	iReply, convErr := strconv.Atoi(reply)
+func AskPassPrompt(params Prompt) (reply int, err error) {
+	reply = -1
+    var convErr error
 
-	for convErr != nil || iReply <= 0 || iReply > len(params.Choices) { // 1 indexed
+	for convErr != nil || reply <= 0 || reply > len(params.Choices) { // 1 indexed
 		cmd := exec.Command("ssh-askpass", formatPrompt(params))
 		out, err := cmd.Output()
 		if err != nil {
 			break
 		}
-		reply = strings.TrimSpace(string(out))
-		iReply, convErr = strconv.Atoi(reply)
+		sReply := strings.TrimSpace(string(out))
+		reply, convErr = strconv.Atoi(sReply)
 	}
 
-	return reply, err
+	return
 }
