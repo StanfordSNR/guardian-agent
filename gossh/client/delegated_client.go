@@ -1,17 +1,14 @@
-package main
+package client
 
 import (
 	"bytes"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"os"
-	"os/user"
 	"path"
-	"strings"
 	"sync"
 	"time"
 
@@ -22,98 +19,41 @@ import (
 
 const debugClient = false
 
-type commandExecution struct {
+type DelegatedClient struct {
+	HostPort string
+	Username string
+	Cmd      string
+
 	session *ssh.Session
 	stdin   io.WriteCloser
 	stdout  io.Reader
 	stderr  io.Reader
 }
 
-func SockFullPath() (string, error) {
-	sockPath := os.Getenv("SSH_AUTH_SOCK")
-	if sockPath != "" {
-		if _, err := os.Stat(sockPath); err == nil {
-			return sockPath, nil
+func findGuardSocket() (string, error) {
+	locations := []string{os.Getenv("SSH_AUTH_SOCK"), path.Join(common.UserRuntimeDir(), common.AgentGuardSockName)}
+	for _, loc := range locations {
+		sock, err := net.Dial("unix", loc)
+		if err != nil {
+			continue
 		}
-	}
-	dir := os.Getenv("XDG_RUNTIME_DIR")
-	if dir != "" {
-		sockPath = path.Join(dir, common.AgentGuardSockName)
-		if _, err := os.Stat(sockPath); err == nil {
-			return sockPath, nil
+		defer sock.Close()
+		query := common.AgentCExtensionMsg{
+			ExtensionType: common.AgentGuardExtensionType,
 		}
-	}
-	curuser, err := user.Current()
-	if err != nil {
-		return "", err
-	}
-	sockPath = path.Join(curuser.HomeDir, ".ssh", common.AgentGuardSockName)
-	if _, err := os.Stat(sockPath); err == nil {
-		return sockPath, nil
+
+		err = common.WriteControlPacket(sock, common.MsgAgentCExtension, ssh.Marshal(query))
+		if err != nil {
+			continue
+		}
+
+		msgNum, _, err := common.ReadControlPacket(sock)
+		if err == nil && msgNum == common.MsgAgentSuccess {
+			sock.Close()
+			return loc, nil
+		}
 	}
 	return "", os.ErrNotExist
-}
-
-func startCommand(conn *ssh.Client, cmd string) (cmdExec *commandExecution, err error) {
-	cmdExec = &commandExecution{}
-	// TODO(dimakogan): initial window size should be set to probably 0, to avoid large amounts
-	// of data to be transfered through proxy prior to handoff.
-	cmdExec.session, err = conn.NewSession()
-	if err != nil {
-		log.Fatalf("Failed to create session: %s", err)
-	}
-
-	cmdExec.stdin, err = cmdExec.session.StdinPipe()
-	if err != nil {
-		cmdExec.session.Close()
-		return nil, err
-	}
-	cmdExec.stdout, err = cmdExec.session.StdoutPipe()
-	if err != nil {
-		cmdExec.session.Close()
-		return nil, err
-	}
-
-	cmdExec.stderr, err = cmdExec.session.StderrPipe()
-	if err != nil {
-		cmdExec.session.Close()
-		return nil, err
-	}
-
-	if err = cmdExec.session.Start(cmd); err != nil {
-		cmdExec.session.Close()
-		return nil, err
-	}
-
-	return cmdExec, nil
-}
-
-func (cmdExec *commandExecution) resume() error {
-	defer cmdExec.session.Close()
-	go func() {
-		io.Copy(cmdExec.stdin, os.Stdin)
-		cmdExec.stdin.Close()
-	}()
-	done := make(chan error)
-	go func() {
-		_, err := io.Copy(os.Stdout, cmdExec.stdout)
-		done <- err
-	}()
-	go func() {
-		_, err := io.Copy(os.Stderr, cmdExec.stderr)
-		done <- err
-	}()
-
-	errExec := cmdExec.session.Wait()
-	errOut1 := <-done
-	errOut2 := <-done
-	if errExec != nil {
-		return errExec
-	}
-	if errOut1 != nil {
-		return errOut1
-	}
-	return errOut2
 }
 
 type settableWriter struct {
@@ -131,100 +71,130 @@ func (sw *settableWriter) Write(p []byte) (n int, err error) {
 	return sw.w.Write(p)
 }
 
-func main() {
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	curuser, err := user.Current()
+func (dc *DelegatedClient) startCommand(conn *ssh.Client, cmd string) (err error) {
+	// TODO(dimakogan): initial window size should be set to probably 0, to avoid large amounts
+	// of data to be transfered through proxy prior to handoff.
+	dc.session, err = conn.NewSession()
 	if err != nil {
-		log.Fatalf("Failed to get current user: %s", err)
+		return fmt.Errorf("Failed to create session: %s", err)
 	}
 
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s [-p port] [user@]hostname [command]\n", os.Args[0])
-		flag.PrintDefaults()
-	}
-
-	var port int
-	flag.IntVar(&port, "p", 22, "Port to connect to on the remote host.")
-
-	flag.Parse()
-	if flag.NArg() < 1 {
-		flag.Usage()
-		os.Exit(1)
-	}
-
-	userHost := strings.Split(flag.Args()[0], "@")
-	var username string
-	var host string
-	if len(userHost) > 1 {
-		username, host = userHost[0], userHost[1]
-	} else {
-		username = curuser.Username
-		host = userHost[0]
-	}
-
-	var cmd string
-	if flag.NArg() < 2 {
-		cmd = "ls -la"
-	} else {
-		cmd = strings.Join(flag.Args()[1:], " ")
-	}
-
-	if debugClient {
-		log.Printf("Host: %s, Port: %d, User: %s\n", host, port, username)
-	}
-
-	addr := fmt.Sprintf("%s:%d", host, port)
-	serverConn, err := net.Dial("tcp", addr)
+	dc.stdin, err = dc.session.StdinPipe()
 	if err != nil {
-		log.Fatalf("Failed to connect to %s:%d: %s", host, port, err)
+		dc.session.Close()
+		return err
+	}
+	dc.stdout, err = dc.session.StdoutPipe()
+	if err != nil {
+		dc.session.Close()
+		return err
+	}
+
+	dc.stderr, err = dc.session.StderrPipe()
+	if err != nil {
+		dc.session.Close()
+		return err
+	}
+
+	if err = dc.session.Start(cmd); err != nil {
+		dc.session.Close()
+		return err
+	}
+
+	return nil
+}
+
+func (dc *DelegatedClient) resume() error {
+	defer dc.session.Close()
+	go func() {
+		io.Copy(dc.stdin, os.Stdin)
+		dc.stdin.Close()
+	}()
+	done := make(chan error)
+	go func() {
+		_, err := io.Copy(os.Stdout, dc.stdout)
+		done <- err
+	}()
+	go func() {
+		_, err := io.Copy(os.Stderr, dc.stderr)
+		done <- err
+	}()
+
+	errExec := dc.session.Wait()
+	errOut1 := <-done
+	errOut2 := <-done
+	if errExec != nil {
+		return errExec
+	}
+	if errOut1 != nil {
+		return errOut1
+	}
+	return errOut2
+}
+
+// Connect starts a delegated session.
+func (dc *DelegatedClient) Run() error {
+	serverConn, err := net.Dial("tcp", dc.HostPort)
+	if err != nil {
+		return fmt.Errorf("Failed to connect to %s: %s", dc.HostPort, err)
 	}
 	defer serverConn.Close()
 
-	guardSock, err := SockFullPath()
+	guardSock, err := findGuardSocket()
 	if err != nil {
-		log.Fatalf("Failed to find ssh auth socket: %s", err)
+		return fmt.Errorf("Failed to find ssh auth socket: %s", err)
 	}
 	master, err := net.Dial("unix", guardSock)
 	if err != nil {
-		log.Fatalf("Failed to connect to proxy: %s", err)
+		return fmt.Errorf("Failed to connect to proxy: %s", err)
 	}
 	defer master.Close()
 
 	execReq := common.ExecutionRequestMessage{
-		User:    username,
-		Command: cmd,
-		Server:  fmt.Sprintf("%s:%d", host, port),
+		User:    dc.Username,
+		Command: dc.Cmd,
+		Server:  dc.HostPort,
 	}
 
 	execReqPacket := ssh.Marshal(execReq)
 	err = common.WriteControlPacket(master, common.MsgExecutionRequest, execReqPacket)
 	if err != nil {
-		log.Fatalf("Failed to send MsgExecutionRequest to proxy: %s", err)
+		return fmt.Errorf("Failed to send MsgExecutionRequest to proxy: %s", err)
 	}
 
 	// Wait for response before opening data connection
-	msgNum, _, err := common.ReadControlPacket(master)
-	if msgNum != common.MsgExecutionApproved {
-		log.Fatalf("Execution was denied: %s", err)
+	msgNum, msg, err := common.ReadControlPacket(master)
+	if err != nil {
+		return fmt.Errorf("Failed to get approval from agent: %s", err)
+	}
+	switch msgNum {
+	case common.MsgExecutionApproved:
+		break
+	case common.MsgExecutionDenied:
+		var denyMsg common.ExecutionDeniedMessage
+		ssh.Unmarshal(msg, &denyMsg)
+		return fmt.Errorf("Execution denied by agent: %s", denyMsg.Reason)
+	default:
+		return fmt.Errorf("Failed to get approval from agent, unknown reply: %d", msgNum)
 	}
 
 	ymux, err := yamux.Client(master, nil)
 	defer ymux.Close()
 	control, err := ymux.Open()
 	if err != nil {
-		log.Fatalf("Failed to get control stream: %s", err)
+		return fmt.Errorf("Failed to get control stream: %s", err)
 	}
 	defer control.Close()
 	// Proceed with approval
 	proxyData, err := ymux.Open()
 	if err != nil {
-		log.Fatalf("Failed to get data stream: %s", err)
+		return fmt.Errorf("Failed to get data stream: %s", err)
 	}
 	defer proxyData.Close()
 
 	pt, err := ymux.Open()
 	if err != nil {
-		log.Fatalf("Failed to get transport stream: %s", err)
+		return fmt.Errorf("Failed to get transport stream: %s", err)
 	}
 	proxyTransport := common.CustomConn{Conn: pt}
 	defer proxyTransport.Close()
@@ -363,29 +333,25 @@ func main() {
 		DeferHostKeyVerification: true,
 	}
 
-	c, chans, reqs, err := ssh.NewClientConn(sshClientConn, addr, &config)
+	c, chans, reqs, err := ssh.NewClientConn(sshClientConn, dc.HostPort, &config)
 	if err != nil {
-		log.Printf("Failed to create NewClientConn:%s", err)
-		return
+		return fmt.Errorf("Failed to create NewClientConn:%s", err)
 	}
 
 	sshClient := ssh.NewClient(c, chans, reqs)
 	if sshClient == nil {
-		log.Printf("Failed to connect to [%s]: %v", addr, err)
+		return fmt.Errorf("Failed to connect to [%s]: %v", dc.HostPort, err)
 	}
 
 	defer sshClient.Close()
 
-	session, err := startCommand(sshClient, cmd)
-	if err != nil {
-		log.Printf("Failed to run command: %s", err)
-		return
+	if err = dc.startCommand(sshClient, dc.Cmd); err != nil {
+		return fmt.Errorf("Failed to run command: %s", err)
 	}
 
 	ok, _, err := sshClient.SendRequest(ssh.NoMoreSessionRequestName, true, nil)
 	if err != nil {
-		log.Printf("Failed to send %s: %s", ssh.NoMoreSessionRequestName, err)
-		return
+		return fmt.Errorf("Failed to send %s: %s", ssh.NoMoreSessionRequestName, err)
 	}
 	if !ok {
 		log.Printf("%s request denied, continuing", ssh.NoMoreSessionRequestName)
@@ -417,8 +383,7 @@ func main() {
 	select {
 	case err = <-handoffComplete:
 		if err != nil {
-			log.Printf("Handoff failed: %s", err)
-			return
+			return fmt.Errorf("Handoff failed: %s", err)
 		}
 		if debugClient {
 			log.Printf("Handoff Complete")
@@ -431,8 +396,6 @@ func main() {
 			log.Printf("Connection error: %s", err)
 		}
 	}
-	err = session.resume()
-	if err != nil {
-		log.Printf("Command failed: %s", err)
-	}
+
+	return dc.resume()
 }

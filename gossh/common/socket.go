@@ -4,8 +4,6 @@ package common
 
 import (
 	"fmt"
-	"io/ioutil"
-	"log"
 	"net"
 	"os"
 	"path"
@@ -15,11 +13,7 @@ import (
 
 func CreateSocket(name string) (s net.Listener, finalName string, err error) {
 	if name == "" {
-		tempDir, err := ioutil.TempDir("", "ssh-guard-")
-		if err != nil {
-			log.Fatalf("Failed creating temp directory: %s", err)
-		}
-		finalName = path.Join(tempDir, fmt.Sprintf("guard.%d", os.Getpid()))
+		finalName = path.Join(UserTempDir(), fmt.Sprintf(".guard.%d", os.Getpid()))
 	} else {
 		finalName = name
 	}

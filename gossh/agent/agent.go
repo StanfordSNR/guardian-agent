@@ -1,13 +1,11 @@
-package main
+package agent
 
 import (
-	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"os"
-	"os/exec"
 	"os/user"
 
 	"path"
@@ -21,22 +19,62 @@ import (
 	"golang.org/x/crypto/ssh/terminal"
 )
 
-func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, fil *ssh.Filter) error {
+type InputType uint8
+
+const (
+	Terminal = iota
+	Display
+)
+
+type Agent struct {
+	realAgentPath string
+	promptFunc    common.PromptUserFunc
+	store         policy.Store
+}
+
+func New(policyConfigPath string, inType InputType) (*Agent, error) {
+	realAgentPath := os.Getenv("SSH_AUTH_SOCK")
+	if realAgentPath == "" {
+		return nil, fmt.Errorf("SSH_AUTH_SOCK not set")
+	}
+
+	var promptFunc common.PromptUserFunc
+	switch inType {
+	case Terminal:
+		if !terminal.IsTerminal(int(os.Stdin.Fd())) {
+			return nil, fmt.Errorf("stanard input is not a terminal")
+		}
+		promptFunc = common.FancyTerminalPrompt
+		break
+	case Display:
+		promptFunc = common.AskPassPrompt
+	}
+
+	// get policy store
+	err, store := policy.NewStore(policyConfigPath)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to load policy store: %s", err)
+	}
+	return &Agent{
+			realAgentPath: realAgentPath,
+			promptFunc:    promptFunc,
+			store:         store},
+		nil
+}
+
+func (a *Agent) proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, fil *ssh.Filter) error {
 	var auths []ssh.AuthMethod
-	aconn, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK"))
+
+	realAgent, err := net.Dial("unix", a.realAgentPath)
 	if err != nil {
 		return err
 	}
 
-	auths = append(auths, ssh.PublicKeysCallback(agent.NewClient(aconn).Signers))
-
-	if err != nil {
-		return err
-	}
+	auths = append(auths, ssh.PublicKeysCallback(agent.NewClient(realAgent).Signers))
 
 	curuser, err := user.Current()
 	if err != nil {
-		log.Fatalf("Failed to get current user: %s", err)
+		return fmt.Errorf("Failed to get current user: %s", err)
 	}
 	kh, err := knownhosts.New(path.Join(curuser.HomeDir, ".ssh", "known_hosts"))
 	if err != nil {
@@ -72,88 +110,7 @@ func proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, fil *ssh.F
 	return common.WriteControlPacket(control, common.MsgHandoffComplete, packet)
 }
 
-func main() {
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	f, err := os.OpenFile("/tmp/ssh-guard.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-	if err != nil {
-		log.Fatalf("error opening file: %v", err)
-	}
-	defer f.Close()
-	log.SetOutput(f)
-	var bindAddr string
-	flag.StringVar(&bindAddr, "a", "", "Address to bind to. Default is /tmp/ssh-guard-XXXXXXXXXX/agent.<ppid>")
-	flag.Parse()
-	masterListener, bindAddr, err := common.CreateSocket(bindAddr)
-	if err != nil {
-		log.Fatalf("Failed to listen on socket %s: %s", bindAddr, err)
-	}
-
-	log.Printf("Listening on: %s", bindAddr)
-	defer masterListener.Close()
-	defer os.Remove(bindAddr)
-
-	args := flag.Args()
-	promptFunc := common.TerminalPrompt
-	stopped := false
-
-	if flag.NArg() > 0 {
-		child := exec.Command(args[0], args[1:]...)
-		env, err := common.ReplaceSSHAuthSockEnv(os.Environ(), bindAddr)
-		if err != nil {
-			log.Fatal(err)
-		}
-		child.Env = env
-
-		child.Stdin = os.Stdin
-		child.Stdout = os.Stdout
-		child.Stderr = os.Stderr
-		if err = child.Start(); err != nil {
-			log.Fatalf("Failed to execute child process: %s", err)
-		}
-		go func() {
-			if err = child.Wait(); err != nil {
-				log.Fatalf("Failed to execute child process: %s", err)
-			}
-			stopped = true
-			masterListener.Close()
-		}()
-		// if running a child, use askpass
-		promptFunc = common.AskPassPrompt
-	} else {
-		// fmt.Printf("SSH_AUTH_SOCK=%s; export SSH_AUTH_SOCK;\n", bindAddr)
-		// fmt.Printf("SSH_AGENT_PID=%d; export SSH_AGENT_PID;\n", os.Getpid())
-		// fmt.Printf("echo Agent pid %d;\n", os.Getpid())
-		// if not check what stdin is
-		if terminal.IsTerminal(int(os.Stdin.Fd())) {
-			promptFunc = common.FancyTerminalPrompt
-		} else {
-			promptFunc = common.AskPassPrompt
-		}
-	}
-
-	// get policy store
-	err, store := policy.NewStore()
-	if err != nil {
-		log.Fatalf("Failed to load store: %s", err)
-	}
-
-	for {
-		master, err := masterListener.Accept()
-		if stopped {
-			break
-		}
-		if err != nil {
-			log.Fatalf("Failed to accept connection: %s", err)
-		}
-		if err = handleConnection(master, store, promptFunc); err != nil {
-			log.Printf("Error handling connection: %s", err)
-		}
-		master.Close()
-	}
-
-}
-
-func handleConnection(master net.Conn, store policy.Store, promptFunc common.PromptUserFunc) error {
+func (agent *Agent) HandleConnection(master net.Conn) error {
 	log.Printf("New incoming connection")
 
 	var err error
@@ -188,14 +145,22 @@ func handleConnection(master net.Conn, store policy.Store, promptFunc common.Pro
 			fC = execReq.Command
 			fSH = execReq.Server
 			gotRequest = true
+		case common.MsgAgentCExtension:
+			queryExtension := new(common.AgentCExtensionMsg)
+			ssh.Unmarshal(payload, queryExtension)
+			if queryExtension.ExtensionType == common.AgentGuardExtensionType {
+				common.WriteControlPacket(master, common.MsgAgentSuccess, []byte{})
+				continue
+			}
+			fallthrough
 		default:
 			if remote {
 				common.WriteControlPacket(master, common.MsgAgentFailure, []byte{})
 				return fmt.Errorf("Denied raw remote access to SSH_AUTH_SOCK ")
 			}
-			realAgent, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK"))
+			realAgent, err := net.Dial("unix", agent.realAgentPath)
 			if err != nil {
-				log.Fatal(err)
+				return err
 			}
 			go func() {
 				io.Copy(master, realAgent)
@@ -211,11 +176,12 @@ func handleConnection(master net.Conn, store policy.Store, promptFunc common.Pro
 		}
 	}
 
-	filter := ssh.NewFilter(policy.Scope{fCU, fCH, fCP, fSU, fSH}, store, fC, promptFunc)
+	filter := ssh.NewFilter(policy.Scope{fCU, fCH, fCP, fSU, fSH}, agent.store, fC, agent.promptFunc)
 
 	if err = filter.IsApproved(); err != nil {
-		common.WriteControlPacket(master, common.MsgExecutionDenied, []byte{})
-		return fmt.Errorf("Request denied: %s", err)
+		common.WriteControlPacket(master, common.MsgExecutionDenied,
+			ssh.Marshal(common.ExecutionDeniedMessage{Reason: err.Error()}))
+		return nil
 	}
 	common.WriteControlPacket(master, common.MsgExecutionApproved, []byte{})
 
@@ -243,7 +209,7 @@ func handleConnection(master net.Conn, store policy.Store, promptFunc common.Pro
 	}
 	defer transport.Close()
 
-	err = proxySSH(sshData, transport, control, filter)
+	err = agent.proxySSH(sshData, transport, control, filter)
 	transport.Close()
 	sshData.Close()
 	control.Close()
@@ -251,6 +217,6 @@ func handleConnection(master net.Conn, store policy.Store, promptFunc common.Pro
 	if err != nil {
 		return fmt.Errorf("Proxy session finished with error: %s", err)
 	}
-	log.Print("Session complete OK")
+
 	return nil
 }

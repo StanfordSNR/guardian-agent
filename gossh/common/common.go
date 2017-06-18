@@ -5,18 +5,31 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"net"
+	"os"
 	"strings"
 )
 
 const debugCommon = false
 
-const AgentGuardSockName = "agent-guard.sock"
+const AgentGuardExtensionType = "agent-guard@cs.stanford.edu"
+
+const AgentGuardSockName = ".agent-guard-sock"
+
+const MsgAgentSuccess = 6
 
 const MsgAgentFailure = 5
 
 type AgentFailureMsg struct{}
+
+const MsgAgentCExtension = 27
+
+type AgentCExtensionMsg struct {
+	ExtensionType string
+	Contents      []byte
+}
 
 const MsgAgentForwardingNotice = 206
 
@@ -38,6 +51,10 @@ const MsgExecutionApproved = 1
 const MaxAgentPacketSize = 10 * 1024
 
 type ExecutionApprovedMessage struct {
+}
+
+type ExecutionDeniedMessage struct {
+	Reason string
 }
 
 type ExecutionRequestMessage struct {
@@ -129,4 +146,24 @@ func ReplaceSSHAuthSockEnv(env []string, newVal string) (newEnv []string, err er
 	}
 	env[i] = fmt.Sprintf("%s=%s", "SSH_AUTH_SOCK", newVal)
 	return env, nil
+}
+
+func UserTempDir() string {
+	dir := os.Getenv("XDG_RUNTIME_DIR")
+	if dir != "" {
+		return dir
+	}
+	dir, err := ioutil.TempDir("", "agentguard")
+	if err == nil {
+		return dir
+	}
+	return os.Getenv("HOME")
+}
+
+func UserRuntimeDir() string {
+	dir := os.Getenv("XDG_RUNTIME_DIR")
+	if dir != "" {
+		return dir
+	}
+	return os.Getenv("HOME")
 }

@@ -2,20 +2,10 @@ package policy
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"os"
-	"os/user"
 	"sync"
 )
-
-func configLocation() (error, string) {
-	usr, err := user.Current()
-	if err != nil {
-		return err, ""
-	}
-	return nil, fmt.Sprintf("%s/.ssh/agent_policies", usr.HomeDir)
-}
 
 type Scope struct {
 	ClientUsername  string `json:"ClientUsername"`
@@ -30,7 +20,10 @@ type Rule struct {
 	Commands    []string `json:"Commands"`
 }
 
-type Store map[Scope]Rule
+type Store struct {
+	rules map[Scope]Rule
+	path  string
+}
 
 var mutex sync.RWMutex
 
@@ -39,12 +32,11 @@ type storageEntry struct {
 	PolicyRule  Rule  `json:"Rule"`
 }
 
-func NewStore() (err error, store Store) {
-
-	err = nil
-	store = make(Store)
+func NewStore(configPath string) (err error, store Store) {
+	store = Store{
+		path: configPath,
+	}
 	err = store.load()
-
 	mutex = sync.RWMutex{}
 
 	return err, store
@@ -63,9 +55,8 @@ func (rule Rule) IsApproved(reqCommand string) bool {
 }
 
 func (store Store) GetRule(scope Scope) Rule {
-
 	mutex.RLock()
-	storedRule, ok := store[scope]
+	storedRule, ok := store.rules[scope]
 	mutex.RUnlock()
 	if ok {
 		return storedRule
@@ -78,7 +69,7 @@ func (store Store) SetAllAllowedInScope(sc Scope) (err error) {
 	rule := store.GetRule(sc)
 	rule.AllCommands = true
 	mutex.Lock()
-	store[sc] = rule
+	store.rules[sc] = rule
 	mutex.Unlock()
 	err = store.save()
 
@@ -94,7 +85,7 @@ func (store Store) SetCommandAllowedInScope(sc Scope, newCommand string) (err er
 	}
 	rule.Commands = append(rule.Commands, newCommand)
 	mutex.Lock()
-	store[sc] = rule
+	store.rules[sc] = rule
 	mutex.Unlock()
 	err = store.save()
 
@@ -102,20 +93,15 @@ func (store Store) SetCommandAllowedInScope(sc Scope, newCommand string) (err er
 }
 
 func (store *Store) load() (err error) {
-	err, configLocation := configLocation()
+	file, err := os.OpenFile(store.path, os.O_RDONLY|os.O_CREATE, 0600)
 	if err != nil {
-		return
-	}
-
-	file, err := os.OpenFile(configLocation, os.O_RDONLY|os.O_CREATE, 0600)
-	if err != nil {
-		log.Panic(err)
+		return err
 	}
 	defer file.Close()
 
 	dec := json.NewDecoder(file)
 	if dec.More() {
-		if err = dec.Decode(&store); err != nil {
+		if err = dec.Decode(&store.rules); err != nil {
 			log.Printf("err is %s", err)
 			return err
 		}
@@ -124,13 +110,7 @@ func (store *Store) load() (err error) {
 }
 
 func (store *Store) save() (err error) {
-
-	err, configLocation := configLocation()
-	if err != nil {
-		return err
-	}
-
-	file, err := os.OpenFile(configLocation, os.O_WRONLY|os.O_CREATE, 0600)
+	file, err := os.OpenFile(store.path, os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
 		return err
 	}
@@ -147,7 +127,7 @@ func (store *Store) save() (err error) {
 
 func (store *Store) MarshalJSON() ([]byte, error) {
 	ps := []storageEntry{}
-	for k, v := range *store {
+	for k, v := range store.rules {
 		ps = append(ps, storageEntry{PolicyScope: k, PolicyRule: v})
 	}
 	val, err := json.Marshal(ps)
@@ -168,7 +148,7 @@ func (store Store) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	for _, v := range tmpStore {
-		store[v.PolicyScope] = v.PolicyRule
+		store.rules[v.PolicyScope] = v.PolicyRule
 	}
 
 	return nil
