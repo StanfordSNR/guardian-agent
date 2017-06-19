@@ -267,13 +267,23 @@ func (dc *DelegatedClient) Run() error {
 		}
 
 		msgNum, handoffPacket, err := common.ReadControlPacket(control)
-		if msgNum != common.MsgHandoffComplete {
-			done <- fmt.Errorf("Unexpected msg: %d, when expecting MsgHandshakeCompleted", handoffPacket[0])
-			return
-		}
 		handoffMsg := new(common.HandoffCompleteMessage)
-		if err = ssh.Unmarshal(handoffPacket, handoffMsg); err != nil {
-			done <- fmt.Errorf("Failed to unmarshal MsgHandshakeCompleted: %s", err)
+		switch msgNum {
+		case common.MsgHandoffComplete:
+			if err = ssh.Unmarshal(handoffPacket, handoffMsg); err != nil {
+				done <- fmt.Errorf("Failed to unmarshal MsgHandshakeCompleted: %s", err)
+				return
+			}
+		case common.MsgHandoffFailed:
+			handoffFailedMsg := new(common.HandoffFailedMessage)
+			ssh.Unmarshal(handoffPacket, handoffFailedMsg)
+			if debugClient {
+				log.Printf("Handoff Failed: %s", handoffFailedMsg.Msg)
+			}
+			done <- errors.New(handoffFailedMsg.Msg)
+			return
+		default:
+			done <- fmt.Errorf("Unexpected msg: %d, when expecting MsgHandshakeCompleted", handoffPacket[0])
 			return
 		}
 
@@ -359,7 +369,7 @@ func (dc *DelegatedClient) Run() error {
 
 	// Uncomment this, together with running a long command (e.g., ping -c10 127.0.0.1),
 	// to trigger a backfill condition.
-	time.Sleep(2 * time.Second)
+	//time.Sleep(2 * time.Second)
 	handoffComplete := make(chan error, 1)
 	doHandoffOnKex <- handoffComplete
 
@@ -383,7 +393,7 @@ func (dc *DelegatedClient) Run() error {
 	select {
 	case err = <-handoffComplete:
 		if err != nil {
-			return fmt.Errorf("Handoff failed: %s", err)
+			return err
 		}
 		if debugClient {
 			log.Printf("Handoff Complete")
@@ -393,7 +403,7 @@ func (dc *DelegatedClient) Run() error {
 			log.Printf("Command finished before handoff: %s", err)
 		}
 		if err != nil {
-			log.Printf("Connection error: %s", err)
+			return err
 		}
 	}
 

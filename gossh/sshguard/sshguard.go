@@ -109,6 +109,7 @@ func main() {
 		if err == nil {
 			return
 		}
+		log.Printf(err.Error())
 		if ee, ok := err.(*ssh.ExitError); ok {
 			if ee.Msg() != "" {
 				fmt.Fprintln(os.Stderr, ee.Msg())

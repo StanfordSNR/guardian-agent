@@ -1,155 +1,72 @@
 package policy
 
 import (
-	"encoding/json"
-	"log"
-	"os"
-	"sync"
+	"errors"
+	"fmt"
+
+	"github.com/dimakogan/ssh/gossh/common"
 )
 
-type Scope struct {
-	ClientUsername  string `json:"ClientUsername"`
-	ClientHostname  string `json:"ClientHostname"`
-	ClientPort      uint32 `json:"ClientPort"`
-	ServiceUsername string `json:"ServiceUsername"`
-	ServiceHostname string `json:"ServiceHostname"`
+type Policy struct {
+	Store      *Store
+	PromptFunc common.PromptUserFunc
 }
 
-type Rule struct {
-	AllCommands bool     `json:"AllCommands"`
-	Commands    []string `json:"Commands"`
+func (policy *Policy) RequestApproval(scope Scope, cmd string) error {
+	if policy.Store.IsAllowed(scope, cmd) {
+		return nil
+	}
+	question := fmt.Sprintf("Allow %s@%s:%d to run '%s' on %s@%s?",
+		scope.ClientUsername, scope.ClientHostname,
+		scope.ClientPort, cmd, scope.ServiceUsername,
+		scope.ServiceHostname)
+
+	prompt := common.Prompt{
+		Question: question,
+		Choices: []string{
+			"Disallow", "Allow once", "Allow forever",
+			fmt.Sprintf("Allow %s@%s:%d to run any command on %s@%s forever",
+				scope.ClientUsername, scope.ClientHostname,
+				scope.ClientPort, scope.ServiceUsername,
+				scope.ServiceHostname),
+		},
+	}
+	resp, err := policy.PromptFunc(prompt)
+
+	switch resp {
+	case 1:
+		err = errors.New("User rejected client request")
+	case 2:
+		err = nil
+	case 3:
+		err = policy.Store.AllowCommand(scope, cmd)
+	case 4:
+		err = policy.Store.AllowAll(scope)
+	}
+
+	return err
 }
 
-type Store struct {
-	rules map[Scope]Rule
-	path  string
-}
+func (policy *Policy) RequestApprovalForAllCommands(scope Scope) error {
+	question := fmt.Sprintf("Can't enforce permission for a single command. Allow %s@%s:%d to run any command on %s@%s?",
+		scope.ClientUsername, scope.ClientHostname,
+		scope.ClientPort, scope.ServiceUsername,
+		scope.ServiceHostname)
 
-var mutex sync.RWMutex
-
-type storageEntry struct {
-	PolicyScope Scope `json:"Scope"`
-	PolicyRule  Rule  `json:"Rule"`
-}
-
-func NewStore(configPath string) (err error, store Store) {
-	store = Store{
-		path: configPath,
+	prompt := common.Prompt{
+		Question: question,
+		Choices:  []string{"Disallow", "Allow for session", "Allow forever"},
 	}
-	err = store.load()
-	mutex = sync.RWMutex{}
+	resp, err := policy.PromptFunc(prompt)
 
-	return err, store
-}
-
-func (rule Rule) IsApproved(reqCommand string) bool {
-	if rule.AllCommands {
-		return true
-	}
-	for _, storedCommand := range rule.Commands {
-		if reqCommand == storedCommand {
-			return true
-		}
-	}
-	return false
-}
-
-func (store Store) GetRule(scope Scope) Rule {
-	mutex.RLock()
-	storedRule, ok := store.rules[scope]
-	mutex.RUnlock()
-	if ok {
-		return storedRule
-	} else {
-		return Rule{AllCommands: false, Commands: make([]string, 0)}
-	}
-}
-
-func (store Store) SetAllAllowedInScope(sc Scope) (err error) {
-	rule := store.GetRule(sc)
-	rule.AllCommands = true
-	mutex.Lock()
-	store.rules[sc] = rule
-	mutex.Unlock()
-	err = store.save()
-
-	return
-}
-
-func (store Store) SetCommandAllowedInScope(sc Scope, newCommand string) (err error) {
-	rule := store.GetRule(sc)
-	for _, command := range rule.Commands {
-		if command == newCommand {
-			return
-		}
-	}
-	rule.Commands = append(rule.Commands, newCommand)
-	mutex.Lock()
-	store.rules[sc] = rule
-	mutex.Unlock()
-	err = store.save()
-
-	return
-}
-
-func (store *Store) load() (err error) {
-	file, err := os.OpenFile(store.path, os.O_RDONLY|os.O_CREATE, 0600)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	dec := json.NewDecoder(file)
-	if dec.More() {
-		if err = dec.Decode(&store.rules); err != nil {
-			log.Printf("err is %s", err)
-			return err
-		}
-	}
-	return nil
-}
-
-func (store *Store) save() (err error) {
-	file, err := os.OpenFile(store.path, os.O_WRONLY|os.O_CREATE, 0600)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	enc := json.NewEncoder(file)
-	mutex.Lock()
-	defer mutex.Unlock()
-	if err := enc.Encode(&store); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (store *Store) MarshalJSON() ([]byte, error) {
-	ps := []storageEntry{}
-	for k, v := range store.rules {
-		ps = append(ps, storageEntry{PolicyScope: k, PolicyRule: v})
-	}
-	val, err := json.Marshal(ps)
-
-	if err != nil {
-		return nil, err
-	}
-	log.Printf("Weird bug2 %s", string(val))
-
-	return val, nil
-}
-
-func (store Store) UnmarshalJSON(b []byte) error {
-	tmpStore := []storageEntry{}
-	err := json.Unmarshal(b, &tmpStore)
-
-	if err != nil {
-		return err
-	}
-	for _, v := range tmpStore {
-		store.rules[v.PolicyScope] = v.PolicyRule
+	switch resp {
+	case 1:
+		err = errors.New("Policy rejected approval escalation")
+	case 2:
+		err = nil
+	case 3:
+		err = policy.Store.AllowAll(scope)
 	}
 
-	return nil
+	return err
 }

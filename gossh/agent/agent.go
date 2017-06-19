@@ -14,7 +14,7 @@ import (
 	"github.com/dimakogan/ssh/gossh/policy"
 	"github.com/hashicorp/yamux"
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/agent"
+	sshAgent "golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
 	"golang.org/x/crypto/ssh/terminal"
 )
@@ -28,7 +28,7 @@ const (
 
 type Agent struct {
 	realAgentPath string
-	promptFunc    common.PromptUserFunc
+	policy        policy.Policy
 	store         policy.Store
 }
 
@@ -57,20 +57,20 @@ func New(policyConfigPath string, inType InputType) (*Agent, error) {
 	}
 	return &Agent{
 			realAgentPath: realAgentPath,
-			promptFunc:    promptFunc,
-			store:         store},
+			store:         store,
+			policy:        policy.Policy{Store: &store, PromptFunc: promptFunc}},
 		nil
 }
 
-func (a *Agent) proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn, fil *ssh.Filter) error {
+func (agent *Agent) proxySSH(scope policy.Scope, toClient net.Conn, toServer net.Conn, control net.Conn, fil *ssh.Filter) error {
 	var auths []ssh.AuthMethod
 
-	realAgent, err := net.Dial("unix", a.realAgentPath)
+	realAgent, err := net.Dial("unix", agent.realAgentPath)
 	if err != nil {
 		return err
 	}
 
-	auths = append(auths, ssh.PublicKeysCallback(agent.NewClient(realAgent).Signers))
+	auths = append(auths, ssh.PublicKeysCallback(sshAgent.NewClient(realAgent).Signers))
 
 	curuser, err := user.Current()
 	if err != nil {
@@ -81,13 +81,13 @@ func (a *Agent) proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn,
 		return err
 	}
 	clientConfig := &ssh.ClientConfig{
-		User:            fil.Scope.ServiceUsername,
+		User:            scope.ServiceUsername,
 		HostKeyCallback: kh,
 		Auth:            auths,
 	}
 
 	meteredConnToServer := common.CustomConn{Conn: toServer}
-	proxy, err := ssh.NewProxyConn(fil.Scope.ServiceHostname, toClient, &meteredConnToServer, clientConfig, fil.FilterClientPacket, fil.FilterServerPacket)
+	proxy, err := ssh.NewProxyConn(scope.ServiceHostname, toClient, &meteredConnToServer, clientConfig, fil)
 	if err != nil {
 		return err
 	}
@@ -99,27 +99,28 @@ func (a *Agent) proxySSH(toClient net.Conn, toServer net.Conn, control net.Conn,
 	done := proxy.Run()
 
 	err = <-done
+	var msgNum byte
+	var msg interface{}
 	if err != nil {
-		return err
-	}
+		msg = common.HandoffFailedMessage{Msg: err.Error()}
+		msgNum = common.MsgHandoffFailed
 
-	handshakeCompletedMsg := common.HandoffCompleteMessage{
-		NextTransportByte: uint32(meteredConnToServer.BytesRead() - proxy.BufferedFromServer()),
+	} else {
+		msg = common.HandoffCompleteMessage{
+			NextTransportByte: uint32(meteredConnToServer.BytesRead() - proxy.BufferedFromServer())}
+		msgNum = common.MsgHandoffComplete
 	}
-	packet := ssh.Marshal(handshakeCompletedMsg)
-	return common.WriteControlPacket(control, common.MsgHandoffComplete, packet)
+	packet := ssh.Marshal(msg)
+	return common.WriteControlPacket(control, msgNum, packet)
 }
 
-func (agent *Agent) HandleConnection(master net.Conn) error {
+func (agent *Agent) HandleConnection(conn net.Conn) error {
 	log.Printf("New incoming connection")
 
-	var err error
-	gotRequest := false
 	remote := false
-	var fCH, fCU, fSH, fSU, fC string
-	var fCP uint32
-	for err == nil && !gotRequest {
-		msgNum, payload, err := common.ReadControlPacket(master)
+	var scope policy.Scope
+	for {
+		msgNum, payload, err := common.ReadControlPacket(conn)
 		if err == io.EOF {
 			return nil
 		}
@@ -133,29 +134,28 @@ func (agent *Agent) HandleConnection(master net.Conn) error {
 			if err := ssh.Unmarshal(payload, notice); err != nil {
 				return fmt.Errorf("Failed to unmarshal AgentForwardingNoticeMsg: %s", err)
 			}
-			fCH = notice.Hostname
-			fCP = notice.Port
-			fCU = notice.Username
+			scope.ClientHostname = notice.Hostname
+			scope.ClientPort = notice.Port
+			scope.ClientUsername = notice.Username
 		case common.MsgExecutionRequest:
 			execReq := new(common.ExecutionRequestMessage)
 			if err = ssh.Unmarshal(payload, execReq); err != nil {
 				return fmt.Errorf("Failed to unmarshal ExecutionRequestMessage: %s", err)
 			}
-			fSU = execReq.User
-			fC = execReq.Command
-			fSH = execReq.Server
-			gotRequest = true
+			scope.ServiceHostname = execReq.Server
+			scope.ServiceUsername = execReq.User
+			agent.handleExecutionRequest(conn, scope, execReq.Command)
 		case common.MsgAgentCExtension:
 			queryExtension := new(common.AgentCExtensionMsg)
 			ssh.Unmarshal(payload, queryExtension)
 			if queryExtension.ExtensionType == common.AgentGuardExtensionType {
-				common.WriteControlPacket(master, common.MsgAgentSuccess, []byte{})
+				common.WriteControlPacket(conn, common.MsgAgentSuccess, []byte{})
 				continue
 			}
 			fallthrough
 		default:
 			if remote {
-				common.WriteControlPacket(master, common.MsgAgentFailure, []byte{})
+				common.WriteControlPacket(conn, common.MsgAgentFailure, []byte{})
 				return fmt.Errorf("Denied raw remote access to SSH_AUTH_SOCK ")
 			}
 			realAgent, err := net.Dial("unix", agent.realAgentPath)
@@ -163,29 +163,31 @@ func (agent *Agent) HandleConnection(master net.Conn) error {
 				return err
 			}
 			go func() {
-				io.Copy(master, realAgent)
+				io.Copy(conn, realAgent)
 			}()
 			if err = common.WriteControlPacket(realAgent, msgNum, payload); err != nil {
 				return err
 			}
 			go func() {
-				io.Copy(realAgent, master)
+				io.Copy(realAgent, conn)
 				realAgent.Close()
 			}()
 			return nil
 		}
 	}
+}
 
-	filter := ssh.NewFilter(policy.Scope{fCU, fCH, fCP, fSU, fSH}, agent.store, fC, agent.promptFunc)
-
-	if err = filter.IsApproved(); err != nil {
-		common.WriteControlPacket(master, common.MsgExecutionDenied,
+func (agent *Agent) handleExecutionRequest(conn net.Conn, scope policy.Scope, cmd string) error {
+	err := agent.policy.RequestApproval(scope, cmd)
+	if err != nil {
+		common.WriteControlPacket(conn, common.MsgExecutionDenied,
 			ssh.Marshal(common.ExecutionDeniedMessage{Reason: err.Error()}))
 		return nil
 	}
-	common.WriteControlPacket(master, common.MsgExecutionApproved, []byte{})
+	filter := ssh.NewFilter(cmd, func() error { return agent.policy.RequestApprovalForAllCommands(scope) })
+	common.WriteControlPacket(conn, common.MsgExecutionApproved, []byte{})
 
-	ymux, err := yamux.Server(master, nil)
+	ymux, err := yamux.Server(conn, nil)
 	if err != nil {
 		return fmt.Errorf("Failed to start ymux: %s", err)
 	}
@@ -209,7 +211,7 @@ func (agent *Agent) HandleConnection(master net.Conn) error {
 	}
 	defer transport.Close()
 
-	err = agent.proxySSH(sshData, transport, control, filter)
+	err = agent.proxySSH(scope, sshData, transport, control, filter)
 	transport.Close()
 	sshData.Close()
 	control.Close()
@@ -219,4 +221,5 @@ func (agent *Agent) HandleConnection(master net.Conn) error {
 	}
 
 	return nil
+
 }

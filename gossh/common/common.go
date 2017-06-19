@@ -44,6 +44,7 @@ const MsgExecutionRequest = 1
 const MsgExecutionRequestAccept = 2
 const MsgExecutionRequestDeny = 2
 const MsgHandoffComplete = 10
+const MsgHandoffFailed = 11
 
 const MsgExecutionDenied = 0
 const MsgExecutionApproved = 1
@@ -65,6 +66,10 @@ type ExecutionRequestMessage struct {
 
 type HandoffCompleteMessage struct {
 	NextTransportByte uint32
+}
+
+type HandoffFailedMessage struct {
+	Msg string
 }
 
 type CustomConn struct {
