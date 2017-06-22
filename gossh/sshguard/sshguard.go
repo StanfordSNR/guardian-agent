@@ -22,7 +22,7 @@ const debugClient = false
 
 func main() {
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s [-p port] [user@]hostname [command]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s [-AdN] [-p port] [user@]hostname [command]\n", os.Args[0])
 		flag.PrintDefaults()
 	}
 
@@ -42,7 +42,7 @@ func main() {
 	flag.BoolVar(&delegatedClient, "d", false, "Delegate authentication to ssh agent guard.")
 
 	var forwardAgent bool
-	flag.BoolVar(&forwardAgent, "A", false, "Do not execute Commands. Useful for standalone SSH Agent Forwarding.")
+	flag.BoolVar(&forwardAgent, "A", false, "(Secure) SSH Agent Forwarding.")
 
 	var noCommand bool
 	flag.BoolVar(&noCommand, "N", false, "Do not execute Commands. Useful for standalone SSH Agent Forwarding.")
