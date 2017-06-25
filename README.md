@@ -23,7 +23,7 @@ Using SSH Guardian Agent requires installation both on your local machine (the o
 Alternatively, you may opt to [build from source](#building).
 3. Extract the two binaries (`sshguard` and `sshfwdstub`) from the tarball to a directory in the user's PATH.
 
-## Building
+## Building from Source
 1. [Install go](https://golang.org/doc/install)
 2. Get the sources (they will also be built)
 
