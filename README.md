@@ -25,9 +25,13 @@ Alternatively, you may opt to [build from source](#building).
 
 ## Building
 1. [Install go](https://golang.org/doc/install)
-2. Get the sources
+2. Get the sources and needed dependencies
 ```
 go get github.com/dimakogan/ssh
+
+go get github.com/hashicorp/yamux
+go get github.com/kballard/go-shellquote
+go get github.com/sternhenri/interact
 ```
 3. Build
 ```
