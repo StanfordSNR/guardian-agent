@@ -42,7 +42,7 @@ func New(policyConfigPath string, inType InputType) (*Agent, error) {
 	switch inType {
 	case Terminal:
 		if !terminal.IsTerminal(int(os.Stdin.Fd())) {
-			return nil, fmt.Errorf("stanard input is not a terminal")
+			return nil, fmt.Errorf("standard input is not a terminal")
 		}
 		promptFunc = common.FancyTerminalPrompt
 		break
