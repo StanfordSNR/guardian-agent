@@ -51,7 +51,7 @@ func main() {
 	flag.StringVar(&policyConfig, "policy", "$HOME/.ssh/agent_policies", "Policy config file")
 
 	var remoteStubName string
-	flag.StringVar(&remoteStubName, "stub", "~/sshfwdstub", "Remote stub executable path")
+	flag.StringVar(&remoteStubName, "stub", "sshfwdstub", "Remote stub executable path")
 
 	var promptType string
 	flag.StringVar(&promptType, "prompt", "", "Type of prompt to use: `DISPLAY|TERMINAL`")
