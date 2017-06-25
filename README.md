@@ -41,7 +41,9 @@ go build github.com/dimakogan/ssh/gossh/sshfwdstub
 ## Basic Usage
 
 Make sure the client is installed on your local machine and both the client and the stub
-are installed on the remote machine.
+are installed on the remote machine. (You'll be able to find the executables in the directory
+from which you ran the build commands from above; to run sshguard as we do below, ensure the
+executable is in your $PATH).
 
 Start an SSH session on a remote machine with secure agent forwarding enabled:
 
@@ -56,6 +58,14 @@ To use SSH remotely with the forwarded agent:
 ```
 
 This should trigger a local graphical consent prompt explicitly identifying `remote`, `server` and `command`.
+
+### Stub location
+
+If the `sshfwdstub` is not installed in the user's `PATH` on the remote machine, its location must be specified when setting up secure agent forwarding from the local machine:
+
+```
+[local]$ sshguard -A --stub=<PATH-TO-STUB> <remote>
+```
 
 ## Advanced Usage
 
@@ -79,18 +89,15 @@ When setting up secure agent forwarding, the default SSH client on the local mac
 
 Specifying additional ssh arguments is currently not supported on the remote host (i.e., when using the `-d` flag).  
 
-### Stub location
-
-If the `sshfwdstub` is not installed in the user's `PATH` on the remote machine, its location must be specified when setting up secure agent forwarding from the local machine:
-
-```
-[local]$ sshguard -A --stub=<PATH-TO-STUB> <remote>
-```
-
 ## Troubleshooting
 
 In case of [unexpected behavior](https://en.wikipedia.org/wiki/Bug_(software)), please consider opening an issue in our [issue tracker](https://github.com/dimakogan/ssh/issues).
 We'd also greatly appreciate if you could run the tool in debug mode by setting the `--debug` and `--logfile=<LOG-FILE>` flags and attach the log file to the issue.
+
+### Common issues
+
+* Make sure the remote machine (or localhost if you are testing locally) has a running ssh daemon
+* Make sure your keys to the remote are added to your ssh-agent so you can connect
 
 ## Development
 [Protocol specification](doc/protocol.md)
