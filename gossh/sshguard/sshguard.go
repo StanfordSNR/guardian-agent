@@ -56,6 +56,9 @@ func main() {
 	var promptType string
 	flag.StringVar(&promptType, "prompt", "", "Type of prompt to use: `DISPLAY|TERMINAL`")
 
+	var logFile string
+	flag.StringVar(&logFile, "logfile", "", "log filename")
+
 	flag.Parse()
 	if flag.NArg() < 1 {
 		flag.Usage()
@@ -64,7 +67,16 @@ func main() {
 
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	if debug {
-		log.SetOutput(os.Stderr)
+		if logFile == "" {
+			log.SetOutput(os.Stderr)
+		} else {
+			f, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0644)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to open log file: %s", err)
+				os.Exit(1)
+			}
+			log.SetOutput(f)
+		}
 	} else {
 		log.SetOutput(ioutil.Discard)
 	}
