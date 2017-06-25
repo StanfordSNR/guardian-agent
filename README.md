@@ -38,12 +38,13 @@ go get github.com/sternhenri/interact
 go build github.com/dimakogan/ssh/gossh/sshguard
 go build github.com/dimakogan/ssh/gossh/sshfwdstub
 ```
+Make sure the resuting binaries (`sshguard` for your local machine and `sshfwdstub` for the remote machine)
+are in a directory in the user's PATH.
+
 ## Basic Usage
 
 Make sure the client is installed on your local machine and both the client and the stub
-are installed on the remote machine. (You'll be able to find the executables in the directory
-from which you ran the build commands from above; to run sshguard as we do below, ensure the
-executable is in your $PATH).
+are installed on the remote machine.
 
 Start an SSH session on a remote machine with secure agent forwarding enabled:
 
