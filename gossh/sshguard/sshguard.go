@@ -18,11 +18,11 @@ import (
 	"github.com/kballard/go-shellquote"
 )
 
-const debugClient = false
+const debugClient = true
 
 func main() {
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s [-AdN] [-p port] [user@]hostname [command]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s [-AdN] [-p port] [-prompt=DISPLAY|TERMINAL] [user@]hostname [command]\n", os.Args[0])
 		flag.PrintDefaults()
 	}
 
@@ -52,6 +52,9 @@ func main() {
 
 	var remoteStubName string
 	flag.StringVar(&remoteStubName, "stub", "~/sshfwdstub", "Remote stub executable path")
+
+	var promptType string
+	flag.StringVar(&promptType, "prompt", "", "Type of prompt to use: `DISPLAY|TERMINAL`")
 
 	flag.Parse()
 	if flag.NArg() < 1 {
@@ -123,11 +126,11 @@ func main() {
 	if forwardAgent {
 		policyConfig = os.ExpandEnv(policyConfig)
 		var ag *agent.Agent
-		if noCommand {
+		if noCommand && promptType != "DISPLAY" {
 			ag, err = agent.New(policyConfig, agent.Terminal)
 		} else {
 			if os.Getenv("DISPLAY") == "" {
-				fmt.Fprintf(os.Stderr, "Command execution requires DISPLAY to be set for user prompts.\nEither set DISPLAY or use -N.")
+				fmt.Fprintf(os.Stderr, "DISPLAY must be set for user prompts.\nEither set the DISPLAY environment variable or use -N.")
 				os.Exit(-1)
 			}
 			ag, err = agent.New(policyConfig, agent.Display)

@@ -48,6 +48,9 @@ func (policy *Policy) RequestApproval(scope Scope, cmd string) error {
 }
 
 func (policy *Policy) RequestApprovalForAllCommands(scope Scope) error {
+	if policy.Store.AreAllAllowed(scope) {
+		return nil
+	}
 	question := fmt.Sprintf("Can't enforce permission for a single command. Allow %s@%s:%d to run any command on %s@%s?",
 		scope.ClientUsername, scope.ClientHostname,
 		scope.ClientPort, scope.ServiceUsername,

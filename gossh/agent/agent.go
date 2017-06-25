@@ -29,7 +29,7 @@ const (
 type Agent struct {
 	realAgentPath string
 	policy        policy.Policy
-	store         policy.Store
+	store         *policy.Store
 }
 
 func New(policyConfigPath string, inType InputType) (*Agent, error) {
@@ -51,14 +51,14 @@ func New(policyConfigPath string, inType InputType) (*Agent, error) {
 	}
 
 	// get policy store
-	err, store := policy.NewStore(policyConfigPath)
+	store, err := policy.NewStore(policyConfigPath)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to load policy store: %s", err)
 	}
 	return &Agent{
 			realAgentPath: realAgentPath,
 			store:         store,
-			policy:        policy.Policy{Store: &store, PromptFunc: promptFunc}},
+			policy:        policy.Policy{Store: store, PromptFunc: promptFunc}},
 		nil
 }
 

@@ -2,34 +2,34 @@ package policy
 
 import (
 	"encoding/json"
-	"log"
 	"os"
 	"sync"
 )
 
 type Store struct {
 	mutex sync.RWMutex
-	rules map[Scope]allowedCommands
+	rules map[Scope]AllowedCommands
 	path  string
 }
 
-type allowedCommands struct {
-	allCommands bool     `json:"AllCommands"`
-	commands    []string `json:"Commands"`
+type AllowedCommands struct {
+	AllCommands bool     `json:"AllCommands"`
+	Commands    []string `json:"Commands"`
 }
 
 type storageEntry struct {
 	PolicyScope Scope           `json:"Scope"`
-	PolicyRule  allowedCommands `json:"AllowedCommands"`
+	PolicyRule  AllowedCommands `json:"AllowedCommands"`
 }
 
-func NewStore(configPath string) (err error, store Store) {
-	store = Store{
-		path: configPath,
+func NewStore(configPath string) (store *Store, err error) {
+	store = &Store{
+		path:  configPath,
+		rules: make(map[Scope]AllowedCommands),
 	}
 	err = store.load()
 
-	return err, store
+	return store, err
 }
 
 func (store *Store) load() (err error) {
@@ -43,8 +43,7 @@ func (store *Store) load() (err error) {
 
 	dec := json.NewDecoder(file)
 	if dec.More() {
-		if err = dec.Decode(&store.rules); err != nil {
-			log.Printf("err is %s", err)
+		if err = dec.Decode(&store); err != nil {
 			return err
 		}
 	}
@@ -61,7 +60,7 @@ func (store *Store) Save() (err error) {
 	enc := json.NewEncoder(file)
 	store.mutex.Lock()
 	defer store.mutex.Unlock()
-	if err := enc.Encode(&store); err != nil {
+	if err := enc.Encode(store); err != nil {
 		return err
 	}
 	return nil
@@ -80,7 +79,7 @@ func (store *Store) MarshalJSON() ([]byte, error) {
 	return val, nil
 }
 
-func (store Store) UnmarshalJSON(b []byte) error {
+func (store *Store) UnmarshalJSON(b []byte) error {
 	tmpStore := []storageEntry{}
 	err := json.Unmarshal(b, &tmpStore)
 
@@ -94,38 +93,42 @@ func (store Store) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-func (store Store) AllowAll(scope Scope) (err error) {
-	store.mutex.RLock()
-	cmds, ok := store.rules[scope]
-	if !ok {
-		cmds = allowedCommands{
-			allCommands: false,
-			commands:    make([]string, 0)}
-	}
-	cmds.allCommands = true
-	store.mutex.RUnlock()
-	return store.Save()
-}
-
-func (store Store) AllowCommand(scope Scope, cmd string) (err error) {
+func (store *Store) AllowAll(scope Scope) (err error) {
 	store.mutex.RLock()
 	allowed, ok := store.rules[scope]
 	if !ok {
-		allowed = allowedCommands{
-			allCommands: false,
-			commands:    make([]string, 0)}
+		allowed = AllowedCommands{
+			AllCommands: false,
+			Commands:    []string{}}
 	}
-	for _, command := range allowed.commands {
+	allowed.AllCommands = true
+	store.rules[scope] = allowed
+	store.mutex.RUnlock()
+
+	return store.Save()
+}
+
+func (store *Store) AllowCommand(scope Scope, cmd string) (err error) {
+	store.mutex.Lock()
+	allowed, ok := store.rules[scope]
+	if !ok {
+		allowed = AllowedCommands{
+			AllCommands: false,
+			Commands:    []string{}}
+	}
+	for _, command := range allowed.Commands {
 		if cmd == command {
 			return
 		}
 	}
-	allowed.commands = append(allowed.commands, cmd)
-	store.mutex.RUnlock()
+	allowed.Commands = append(allowed.Commands, cmd)
+	store.rules[scope] = allowed
+	store.mutex.Unlock()
+
 	return store.Save()
 }
 
-func (store Store) IsAllowed(scope Scope, cmd string) bool {
+func (store *Store) IsAllowed(scope Scope, cmd string) bool {
 	store.mutex.RLock()
 	defer store.mutex.RUnlock()
 	allowed, ok := store.rules[scope]
@@ -133,10 +136,10 @@ func (store Store) IsAllowed(scope Scope, cmd string) bool {
 		return false
 	}
 
-	if allowed.allCommands {
+	if allowed.AllCommands {
 		return true
 	}
-	for _, storedCommand := range allowed.commands {
+	for _, storedCommand := range allowed.Commands {
 		if cmd == storedCommand {
 			return true
 		}
@@ -144,7 +147,7 @@ func (store Store) IsAllowed(scope Scope, cmd string) bool {
 	return false
 }
 
-func (store Store) AreAllAllowed(scope Scope) bool {
+func (store *Store) AreAllAllowed(scope Scope) bool {
 	store.mutex.RLock()
 	defer store.mutex.RUnlock()
 	allowed, ok := store.rules[scope]
@@ -152,5 +155,5 @@ func (store Store) AreAllAllowed(scope Scope) bool {
 		return false
 	}
 
-	return allowed.allCommands
+	return allowed.AllCommands
 }
