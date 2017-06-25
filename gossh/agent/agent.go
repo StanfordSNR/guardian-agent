@@ -121,7 +121,7 @@ func (agent *Agent) HandleConnection(conn net.Conn) error {
 	var scope policy.Scope
 	for {
 		msgNum, payload, err := common.ReadControlPacket(conn)
-		if err == io.EOF {
+		if err == io.EOF || err == io.ErrClosedPipe {
 			return nil
 		}
 		if err != nil {
