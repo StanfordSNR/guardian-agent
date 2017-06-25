@@ -3,6 +3,27 @@
 SSH Guardian Agent is an SSH client providing secure SSH agent forwarding.
 
 
+## Installation
+Using SSH Guardian Agent requires installation both on your local machine (the one with your SSH private keys) and on each of the remote machines you want to securely forward SSH agent to (the machines on which you want to run an SSH client without having the keys on them). No installation is required on the server side.
+
+1. Install the following dependencies:
+  * OpenSSH client
+  * ssh-askpass (MacOS users can use the [following port](https://github.com/theseal/ssh-askpass))
+2. Obtain the [latest tarball](https://github.com/dimakogan/ssh/releases/latest) for your platform. 
+Alternatively, you may opt to [build from source](#building).
+3. Extract the two binaries (`sshguard` and `sshfwdstub`) from the tarball to a directory in the user's PATH.
+
+## Building
+1. [Install go](https://golang.org/doc/install)
+2. Get the sources
+```
+go get github.com/dimakogan/ssh
+```
+3. Build
+```
+go build github.com/dimakogan/ssh/gossh/sshguard
+go build github.com/dimakogan/ssh/gossh/sshfwdstub
+```
 ## Basic Usage
 
 Make sure the client is installed on your local machine and both the client and the stub
@@ -52,5 +73,10 @@ If the `sshfwdstub` is not installed in the user's `PATH` on the remote machine,
 [local]$ sshguard -A --stub=<PATH-TO-STUB> <remote>
 ```
 
-# Development
+## Troubleshooting
+
+In case of [unexpected behavior](https://en.wikipedia.org/wiki/Bug_(software)), please consider opening an issue in our [issue tracker](https://github.com/dimakogan/ssh/issues).
+We'd also greatly appreciate if you could run the tool in debug mode by setting the `--debug` and `--logfile=<LOG-FILE>` flags and attach the log file to the issue.
+
+## Development
 [Protocol specification](doc/protocol.md)
