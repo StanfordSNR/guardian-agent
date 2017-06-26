@@ -67,7 +67,6 @@ func (fwd *SSHFwd) SetupForwarding() error {
 		return fmt.Errorf("Failed to run %s %s: %s\n%s", remoteStub.Path, remoteStub.Args, err, fullStdErr)
 	}
 
-	go io.Copy(os.Stderr, remoteStdErr)
 	stubReader := bufio.NewReader(remoteStdOut)
 	remoteSocket, _, err := stubReader.ReadLine()
 	if err != nil {

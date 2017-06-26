@@ -167,6 +167,7 @@ func main() {
 
 		if err = sshFwd.SetupForwarding(); err != nil {
 			fmt.Fprintf(os.Stderr, "%s", err)
+			os.Exit(1)
 		}
 
 		done := false
