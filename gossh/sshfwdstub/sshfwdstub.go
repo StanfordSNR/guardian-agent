@@ -12,6 +12,7 @@ import (
 
 func main() {
 	tempSocket := path.Join(common.UserTempDir(), fmt.Sprintf("guard.%d", os.Getpid()))
+	defer os.Remove(tempSocket)
 	_, err := fmt.Println(tempSocket)
 	if err != nil {
 		log.Fatalf("Failed to write temp dir location: %s", err)
@@ -27,12 +28,16 @@ func main() {
 
 	permanentSocket := path.Join(common.UserRuntimeDir(), common.AgentGuardSockName)
 
-	if _, err := os.Stat(permanentSocket); err == nil {
-		os.Remove(permanentSocket)
+	if _, err := os.Lstat(permanentSocket); err == nil {
+		err = os.Remove(permanentSocket)
+		if err != nil {
+			log.Fatalf("Failed to remove old permanent socket: %s", err)
+		}
 	}
 
 	if err := os.Symlink(tempSocket, permanentSocket); err != nil {
 		log.Fatalf("Failed to create symlink %s --> %s : %s", permanentSocket, tempSocket, err)
 	}
+	fmt.Println("OK")
 	reader.ReadLine()
 }

@@ -99,6 +99,11 @@ func (fwd *SSHFwd) SetupForwarding() error {
 	if err != nil {
 		return fmt.Errorf("Failed to ack forwarding: %s", err)
 	}
+	_, _, err = stubReader.ReadLine()
+	if err != nil {
+		allErr, _ := ioutil.ReadAll(remoteStdErr)
+		return fmt.Errorf("Failed to establish ssh forwarding with stub: %s\n%s", err, allErr)
+	}
 	return nil
 }
 
