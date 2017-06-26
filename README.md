@@ -25,20 +25,12 @@ Alternatively, you may opt to [build from source](#building).
 
 ## Building from Source
 1. [Install go](https://golang.org/doc/install)
-2. Get the sources (they will also be built)
-
-On your local machine:
+2. Get and build the sources:
 ```
 go get github.com/dimakogan/ssh/gossh/sshguard
-```
-
-On your remote machine:
-```
 go get github.com/dimakogan/ssh/gossh/sshfwdstub
 ```
-
-Make sure the resuting binaries (`sshguard` for your local machine and `sshfwdstub` for the remote machine)
-are in a directory in their respective user's PATH.
+3. The binaries (`sshguard` and `sshfwdstub`) should be found in `$GOPATH/bin`.
 
 ## Basic Usage
 
