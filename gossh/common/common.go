@@ -158,7 +158,7 @@ func UserTempDir() string {
 	if dir != "" {
 		return dir
 	}
-	dir, err := ioutil.TempDir("", "agentguard")
+	dir, err := ioutil.TempDir("", "")
 	if err == nil {
 		return dir
 	}

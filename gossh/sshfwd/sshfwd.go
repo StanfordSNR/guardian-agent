@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"io"
 	"log"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path"
@@ -15,6 +16,8 @@ import (
 	"fmt"
 
 	"io/ioutil"
+
+	"strconv"
 
 	"github.com/dimakogan/ssh/gossh/common"
 )
@@ -37,7 +40,7 @@ type SSHFwd struct {
 func (fwd *SSHFwd) SetupForwarding() error {
 	fwd.SSHArgs = append(fwd.SSHArgs,
 		fmt.Sprintf("-p %d", fwd.Port),
-		"-S", path.Join(common.UserTempDir(), "%C.master"),
+		"-S", path.Join(common.UserTempDir(), strconv.Itoa(int(rand.Int31()))),
 		fmt.Sprintf("%s@%s", fwd.Username, fwd.Host))
 	remoteStub := exec.Command(fwd.SSHCmd, append(fwd.SSHArgs, "-M", fwd.RemoteStubName)...)
 	remoteStdErr, err := remoteStub.StderrPipe()
