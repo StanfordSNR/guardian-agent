@@ -1,6 +1,3 @@
-[submodule "paramiko"]
-	path = paramiko
-	url = git@github.com:dimakogan/paramiko.git
 [submodule "gossh/vendor/golang.org/x/crypto"]
 	path = gossh/vendor/golang.org/x/crypto
 	url = git@github.com:dimakogan/crypto.git
