@@ -1,3 +1,3 @@
 [submodule "gossh/vendor/golang.org/x/crypto"]
 	path = gossh/vendor/golang.org/x/crypto
-	url = git@github.com:dimakogan/crypto.git
+	url = git://github.com/dimakogan/crypto.git
