@@ -263,9 +263,19 @@ func (dc *DelegatedClient) Run() error {
 			done <- fmt.Errorf("From proxy transport forwarding failed: %s", err)
 			return
 		}
-		if err = <-toProxyTransportDone; err != nil && err != yamux.ErrStreamClosed {
-			return
+
+		serverOut.mu.Lock()
+		serverOut.w = sshPipe
+		select {
+		case err = <-toProxyTransportDone:
+			if err != nil && err != yamux.ErrStreamClosed {
+				done <- fmt.Errorf("To proxy transport forwarding failed: %s", err)
+			}
+			// Restart the copy routine if it ended due to an EOF on proxyTransport
+			go io.Copy(&serverOut, serverConn)
+		default:
 		}
+
 		sshOut.mu.Lock()
 		sshOut.w = serverConn
 		sshOut.mu.Unlock()
@@ -337,7 +347,6 @@ func (dc *DelegatedClient) Run() error {
 				log.Printf("Backfilled %d bytes from server to client", n)
 			}
 			done <- nil
-			io.Copy(sshPipe, serverConn)
 		}()
 	}
 
