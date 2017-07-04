@@ -10,14 +10,13 @@ import (
 	"os"
 	"path"
 	"sync"
-	"time"
 
 	"github.com/dimakogan/ssh/gossh/common"
 	"github.com/hashicorp/yamux"
 	"golang.org/x/crypto/ssh"
 )
 
-const debugClient = false
+const debugClient = true
 
 type DelegatedClient struct {
 	HostPort string
@@ -132,7 +131,7 @@ func (dc *DelegatedClient) resume() error {
 	return errOut2
 }
 
-// Connect starts a delegated session.
+// Run starts a delegated session.
 func (dc *DelegatedClient) Run() error {
 	serverConn, err := net.Dial("tcp", dc.HostPort)
 	if err != nil {
@@ -204,27 +203,33 @@ func (dc *DelegatedClient) Run() error {
 	// Initially, the SSH connection is wired to the proxy data,
 	// and the server connection is wired to the proxy transport.
 	sshOut := settableWriter{w: proxyData}
-	proxyOut := settableWriter{w: sshPipe}
 	serverOut := settableWriter{w: &proxyTransport}
 
 	go io.Copy(&sshOut, sshPipe)
 	proxyDone := make(chan error)
 	go func() {
-		_, err := io.Copy(&proxyOut, proxyData)
+		_, err := io.Copy(sshPipe, proxyData)
 		if debugClient {
 			log.Printf("Finished copying ssh data from proxy: %s", err)
 		}
 		proxyDone <- err
 	}()
 
-	go io.Copy(&serverOut, serverConn)
-	proxyTransportDone := make(chan error)
+	toProxyTransportDone := make(chan error)
+	go func() {
+		_, err := io.Copy(&serverOut, serverConn)
+		if debugClient {
+			log.Printf("Finished copying transport data to proxy")
+		}
+		toProxyTransportDone <- err
+	}()
+	fromProxyTransportDone := make(chan error)
 	go func() {
 		_, err := io.Copy(serverConn, &proxyTransport)
 		if debugClient {
 			log.Printf("Finished copying transport data from proxy")
 		}
-		proxyTransportDone <- err
+		fromProxyTransportDone <- err
 	}()
 
 	doHandoffOnKex := make(chan chan error, 1)
@@ -232,6 +237,7 @@ func (dc *DelegatedClient) Run() error {
 	// after the handoff (since the transport layer might deliver to the proxy
 	// packets that the server has sent after msgNewKeys).
 	bufferedTraffic := new(bytes.Buffer)
+	bufferedOffset := 0
 	kexCallback := func(err error) {
 		if debugClient {
 			log.Printf("KexCallback called")
@@ -253,8 +259,11 @@ func (dc *DelegatedClient) Run() error {
 			log.Printf("Starting transport rewiring")
 		}
 
-		if err = <-proxyTransportDone; err != nil {
-			done <- fmt.Errorf("Proxy transport forwarding failed: %s", err)
+		if err = <-fromProxyTransportDone; err != nil {
+			done <- fmt.Errorf("From proxy transport forwarding failed: %s", err)
+			return
+		}
+		if err = <-toProxyTransportDone; err != nil && err != yamux.ErrStreamClosed {
 			return
 		}
 		sshOut.mu.Lock()
@@ -291,22 +300,18 @@ func (dc *DelegatedClient) Run() error {
 			log.Printf("Got handoffMsg.NextTransportByte: %d", handoffMsg.NextTransportByte)
 		}
 
-		time.Sleep(500 * time.Millisecond)
-		serverOut.mu.Lock()
-		serverOut.w = sshPipe
-
 		// Close the connection to the proxy
 		master.Close()
 
-		backfillLen := int(uint32(proxyTransport.BytesWritten()) - handoffMsg.NextTransportByte)
-		if backfillLen < 0 {
+		backfillPos := int(handoffMsg.NextTransportByte) - bufferedOffset
+		if backfillPos > bufferedTraffic.Len() {
 			done <- fmt.Errorf(
-				"Unexpected negative backfill len, read from server: %d, reported by proxy: %d",
-				proxyTransport.BytesWritten(), handoffMsg.NextTransportByte)
+				"Unexpected backfill pos, latest read from server: %d, latest reported by proxy: %d",
+				bufferedOffset+bufferedTraffic.Len(), handoffMsg.NextTransportByte)
 			serverOut.mu.Unlock()
 			return
 		}
-		if backfillLen == 0 {
+		if backfillPos == bufferedTraffic.Len() {
 			if debugClient {
 				log.Printf("No backfill necessary")
 			}
@@ -314,12 +319,12 @@ func (dc *DelegatedClient) Run() error {
 			serverOut.mu.Unlock()
 			return
 		}
-		if bufferedTraffic.Len() < backfillLen {
-			done <- fmt.Errorf("Missing bytes to backfill, required: %d, available: %d", backfillLen, bufferedTraffic.Len())
+		if backfillPos < 0 {
+			done <- fmt.Errorf("Missing bytes to backfill: %d", backfillPos)
 			serverOut.mu.Unlock()
 			return
 		}
-		bufferedTraffic.Next(bufferedTraffic.Len() - backfillLen)
+		bufferedTraffic.Next(backfillPos)
 
 		//sshServerConn is unbuffered so we empty the buffer in a separate goroutine to avoid a deadlock
 		go func() {
@@ -332,6 +337,7 @@ func (dc *DelegatedClient) Run() error {
 				log.Printf("Backfilled %d bytes from server to client", n)
 			}
 			done <- nil
+			io.Copy(sshPipe, serverConn)
 		}()
 	}
 
@@ -367,9 +373,6 @@ func (dc *DelegatedClient) Run() error {
 		log.Printf("%s request denied, continuing", ssh.NoMoreSessionRequestName)
 	}
 
-	// Uncomment this, together with running a long command (e.g., ping -c10 127.0.0.1),
-	// to trigger a backfill condition.
-	//time.Sleep(2 * time.Second)
 	handoffComplete := make(chan error, 1)
 	doHandoffOnKex <- handoffComplete
 
@@ -381,7 +384,8 @@ func (dc *DelegatedClient) Run() error {
 	// sent by ther server after msgNewKeys might need to replayed
 	// to the client after the handoff.
 	serverOut.mu.Lock()
-	serverOut.w = io.MultiWriter(serverOut.w, bufferedTraffic)
+	serverOut.w = io.MultiWriter(bufferedTraffic, serverOut.w)
+	bufferedOffset = proxyTransport.BytesWritten()
 	serverOut.mu.Unlock()
 
 	sshClient.RequestKeyChange()
