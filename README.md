@@ -19,7 +19,7 @@ Using SSH Guardian Agent requires installation both on your local machine (the o
 1. Install the following dependencies:
   * OpenSSH client
   * ssh-askpass (MacOS users can use the [following port](https://github.com/theseal/ssh-askpass))
-2. Obtain the [latest tarball](https://github.com/dimakogan/ssh/releases/latest) for your platform. 
+2. Obtain the [latest release](https://github.com/dimakogan/ssh/releases/latest) for your platform. 
 Alternatively, you may opt to [build from source](#building).
 3. Extract the two binaries (`sshguard` and `sshfwdstub`) from the tarball to a directory in the user's PATH.
 
