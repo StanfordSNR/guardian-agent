@@ -41,13 +41,10 @@ type AgentForwardingNoticeMsg struct {
 }
 
 const MsgExecutionRequest = 1
-const MsgExecutionRequestAccept = 2
-const MsgExecutionRequestDeny = 2
+const MsgExecutionDenied = 2
+const MsgExecutionApproved = 3
 const MsgHandoffComplete = 10
 const MsgHandoffFailed = 11
-
-const MsgExecutionDenied = 0
-const MsgExecutionApproved = 1
 
 const MaxAgentPacketSize = 10 * 1024
 
