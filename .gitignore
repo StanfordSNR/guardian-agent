@@ -4,3 +4,4 @@
 /gossh/agent/agent.exe
 /gossh/sshfwdstub/sshfwdstub
 *.go~
+.vscode/
