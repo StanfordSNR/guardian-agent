@@ -32,6 +32,9 @@ func (policy *Policy) RequestApproval(scope Scope, cmd string) error {
 		},
 	}
 	resp, err := policy.PromptFunc(prompt)
+	if err != nil {
+		return fmt.Errorf("Failed to get user approval: %s", err)
+	}
 
 	switch resp {
 	case 1:

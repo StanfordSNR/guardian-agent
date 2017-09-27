@@ -62,7 +62,7 @@ func main() {
 	flag.Parse()
 	if flag.NArg() < 1 {
 		flag.Usage()
-		os.Exit(1)
+		os.Exit(255)
 	}
 
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
@@ -73,7 +73,7 @@ func main() {
 			f, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0644)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Failed to open log file: %s", err)
-				os.Exit(1)
+				os.Exit(255)
 			}
 			log.SetOutput(f)
 		}
@@ -132,7 +132,7 @@ func main() {
 			os.Exit(ee.ExitStatus())
 		}
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(-1)
+		os.Exit(255)
 	}
 
 	if forwardAgent {
@@ -143,18 +143,18 @@ func main() {
 		} else {
 			if os.Getenv("DISPLAY") == "" {
 				fmt.Fprintf(os.Stderr, "DISPLAY must be set for user prompts.\nEither set the DISPLAY environment variable or use -N.")
-				os.Exit(-1)
+				os.Exit(255)
 			}
 			ag, err = agent.New(policyConfig, agent.Display)
 		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s", err)
-			os.Exit(-1)
+			os.Exit(255)
 		}
 		sshArgsArray, err := shellquote.Split(sshArgs)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to parse ssh_args: %s", err)
-			os.Exit(-1)
+			os.Exit(255)
 		}
 		sshFwd := sshfwd.SSHFwd{
 			SSHCmd:         sshCmd,
@@ -167,7 +167,7 @@ func main() {
 
 		if err = sshFwd.SetupForwarding(); err != nil {
 			fmt.Fprintf(os.Stderr, "%s", err)
-			os.Exit(1)
+			os.Exit(255)
 		}
 
 		done := false
@@ -185,6 +185,7 @@ func main() {
 			if err != nil {
 				if !done {
 					log.Printf("Error forwarding: %s", err)
+					os.Exit(255)
 				}
 				break
 			}

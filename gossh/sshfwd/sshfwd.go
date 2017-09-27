@@ -84,6 +84,11 @@ func (fwd *SSHFwd) SetupForwarding() error {
 	fwd.remoteSocket = string(remoteSocket)
 	fwd.listener = listener
 
+	go func() {
+		err = remoteStub.Wait()
+		fwd.listener.Close()
+	}()
+
 	child := exec.Command(fwd.SSHCmd,
 		append(fwd.SSHArgs, "-o ExitOnForwardFailure yes", "-T", "-O", "forward", fmt.Sprintf("-R %s:%s", string(remoteSocket), bindAddr))...)
 	_, err = child.Output()
