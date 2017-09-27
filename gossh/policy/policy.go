@@ -8,12 +8,16 @@ import (
 )
 
 type Policy struct {
-	Store      *Store
-	PromptFunc common.PromptUserFunc
+	Store    *Store
+	Interact common.Interact
 }
 
 func (policy *Policy) RequestApproval(scope Scope, cmd string) error {
 	if policy.Store.IsAllowed(scope, cmd) {
+		policy.Interact.Inform(fmt.Sprintf("Request by %s@%s:%d to run '%s' on %s@%s auto approved by policy",
+			scope.ClientUsername, scope.ClientHostname,
+			scope.ClientPort, cmd, scope.ServiceUsername,
+			scope.ServiceHostname))
 		return nil
 	}
 	question := fmt.Sprintf("Allow %s@%s:%d to run '%s' on %s@%s?",
@@ -31,7 +35,7 @@ func (policy *Policy) RequestApproval(scope Scope, cmd string) error {
 				scope.ServiceHostname),
 		},
 	}
-	resp, err := policy.PromptFunc(prompt)
+	resp, err := policy.Interact.Ask(prompt)
 	if err != nil {
 		return fmt.Errorf("Failed to get user approval: %s", err)
 	}
@@ -52,6 +56,9 @@ func (policy *Policy) RequestApproval(scope Scope, cmd string) error {
 
 func (policy *Policy) RequestApprovalForAllCommands(scope Scope) error {
 	if policy.Store.AreAllAllowed(scope) {
+		policy.Interact.Inform(fmt.Sprintf("Request by %s@%s:%d to run any command on %s@%s auto approved by policy",
+			scope.ClientUsername, scope.ClientHostname,
+			scope.ClientPort, scope.ServiceUsername, scope.ServiceHostname))
 		return nil
 	}
 	question := fmt.Sprintf("Can't enforce permission for a single command. Allow %s@%s:%d to run any command on %s@%s?",
@@ -63,7 +70,7 @@ func (policy *Policy) RequestApprovalForAllCommands(scope Scope) error {
 		Question: question,
 		Choices:  []string{"Disallow", "Allow for session", "Allow forever"},
 	}
-	resp, err := policy.PromptFunc(prompt)
+	resp, err := policy.Interact.Ask(prompt)
 
 	switch resp {
 	case 1:

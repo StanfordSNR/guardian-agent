@@ -38,16 +38,16 @@ func New(policyConfigPath string, inType InputType) (*Agent, error) {
 		return nil, fmt.Errorf("SSH_AUTH_SOCK not set")
 	}
 
-	var promptFunc common.PromptUserFunc
+	var interact common.Interact
 	switch inType {
 	case Terminal:
 		if !terminal.IsTerminal(int(os.Stdin.Fd())) {
 			return nil, fmt.Errorf("standard input is not a terminal")
 		}
-		promptFunc = common.FancyTerminalPrompt
+		interact = common.FancyTerminal{}
 		break
 	case Display:
-		promptFunc = common.AskPassPrompt
+		interact = common.AskPass{}
 	}
 
 	// get policy store
@@ -58,7 +58,7 @@ func New(policyConfigPath string, inType InputType) (*Agent, error) {
 	return &Agent{
 			realAgentPath: realAgentPath,
 			store:         store,
-			policy:        policy.Policy{Store: store, PromptFunc: promptFunc}},
+			policy:        policy.Policy{Store: store, Interact: interact}},
 		nil
 }
 

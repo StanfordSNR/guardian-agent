@@ -4,18 +4,45 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	i "github.com/sternhenri/interact"
+	"log"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+
+	i "github.com/sternhenri/interact"
 )
 
-type PromptUserFunc func(prompt Prompt) (int, error)
+type Interact interface {
+	Ask(prompt Prompt) (int, error)
+	Inform(msg string)
+}
+
+type Terminal struct{}
+type FancyTerminal struct{}
+type AskPass struct{}
 
 type Prompt struct {
 	Question string
 	Choices  []string
+}
+
+func (Terminal) Ask(params Prompt) (reply int, err error) {
+	reply = -1
+	var convErr error
+
+	for convErr != nil || reply <= 0 || reply > len(params.Choices) {
+		fmt.Print(formatPrompt(params))
+		reader := bufio.NewReader(os.Stdin)
+		sReply, _ := reader.ReadString('\n')
+		reply, convErr = strconv.Atoi(strings.TrimSpace(sReply))
+	}
+
+	return
+}
+
+func (Terminal) Inform(msg string) {
+	fmt.Println(msg)
 }
 
 func formatPrompt(params Prompt) (formattedPrompt string) {
@@ -29,21 +56,7 @@ func formatPrompt(params Prompt) (formattedPrompt string) {
 	return
 }
 
-func TerminalPrompt(params Prompt) (reply int, err error) {
-	reply = -1
-    var convErr error
-
-	for convErr != nil || reply <= 0 || reply > len(params.Choices) {
-		fmt.Print(formatPrompt(params))
-		reader := bufio.NewReader(os.Stdin)
-		sReply, _ := reader.ReadString('\n')
-		reply, convErr = strconv.Atoi(strings.TrimSpace(sReply))
-	}
-
-	return 
-}
-
-func MapToChoice(vs []string) []i.Choice {
+func mapToChoice(vs []string) []i.Choice {
 	vsm := make([]i.Choice, len(vs))
 	for j, v := range vs {
 		vsm[j] = i.Choice{Text: v}
@@ -51,7 +64,7 @@ func MapToChoice(vs []string) []i.Choice {
 	return vsm
 }
 
-func FancyTerminalPrompt(params Prompt) (reply int, err error) {
+func (FancyTerminal) Ask(params Prompt) (reply int, err error) {
 	var resp int64
 
 	i.Run(&i.Interact{
@@ -60,7 +73,7 @@ func FancyTerminalPrompt(params Prompt) (reply int, err error) {
 				Quest: i.Quest{
 					Msg: params.Question,
 					Choices: i.Choices{
-						Alternatives: MapToChoice(params.Choices),
+						Alternatives: mapToChoice(params.Choices),
 					},
 				},
 				Action: func(c i.Context) interface{} {
@@ -74,19 +87,27 @@ func FancyTerminalPrompt(params Prompt) (reply int, err error) {
 	return
 }
 
-func AskPassPrompt(params Prompt) (reply int, err error) {
+func (FancyTerminal) Inform(msg string) {
+	fmt.Println(msg)
+}
+
+func (AskPass) Ask(params Prompt) (reply int, err error) {
 	reply = -1
-    var convErr error
+	var convErr error
 
 	for convErr != nil || reply <= 0 || reply > len(params.Choices) { // 1 indexed
 		cmd := exec.Command("ssh-askpass", formatPrompt(params))
 		out, err := cmd.Output()
 		if err != nil {
-			break
+			return reply, err
 		}
 		sReply := strings.TrimSpace(string(out))
 		reply, convErr = strconv.Atoi(sReply)
 	}
 
 	return
+}
+
+func (AskPass) Inform(msg string) {
+	log.Printf(msg)
 }
