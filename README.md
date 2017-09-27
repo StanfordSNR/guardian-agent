@@ -92,4 +92,4 @@ We'd also greatly appreciate if you could run the tool in debug mode by setting 
 * Make sure your keys to the remote are added to your ssh-agent so you can connect
 
 ## Development
-[Protocol specification](doc/protocol.md)
+[Detailed Design](doc/design.md)
