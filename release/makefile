@@ -2,8 +2,8 @@ GOOS = linux
 GOARCH = amd64
 
 all:
-	mkdir -p sshguard_$(GOOS)_$(GOARCH)
-	go build -o sshguard_$(GOOS)_$(GOARCH)/sshguard ../sshguard/
-	go build -o sshguard_$(GOOS)_$(GOARCH)/sshfwdstub ../sshfwdstub/
-	tar czvf sshguard_$(GOOS)_$(GOARCH).tar.gz sshguard_$(GOOS)_$(GOARCH)
+	mkdir -p guardian-agent_$(GOOS)_$(GOARCH)
+	go build -o guardian-agent_$(GOOS)_$(GOARCH)/ssh-guard-agent ../cmd/ssh-guard-agent/
+	go build -o guardian-agent_$(GOOS)_$(GOARCH)/ssh-fwd-stub ../cmd/ssh-fwd-stub/
+	tar czvf guardian-agent_$(GOOS)_$(GOARCH).tar.gz guardian-agent_$(GOOS)_$(GOARCH)
 	

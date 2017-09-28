@@ -7,11 +7,11 @@ import (
 	"os"
 	"path"
 
-	"github.com/dimakogan/ssh/gossh/common"
+	"github.com/StanfordSNR/guardian-agent"
 )
 
 func main() {
-	tempSocket := path.Join(common.UserTempDir(), fmt.Sprintf("guard.%d", os.Getpid()))
+	tempSocket := path.Join(guardianagent.UserTempDir(), fmt.Sprintf("guard.%d", os.Getpid()))
 	defer os.Remove(tempSocket)
 	_, err := fmt.Println(tempSocket)
 	if err != nil {
@@ -26,7 +26,7 @@ func main() {
 		log.Fatalf("Failed to find forwarded socket: %s", err)
 	}
 
-	permanentSocket := path.Join(common.UserRuntimeDir(), common.AgentGuardSockName)
+	permanentSocket := path.Join(guardianagent.UserRuntimeDir(), guardianagent.AgentGuardSockName)
 
 	if _, err := os.Lstat(permanentSocket); err == nil {
 		err = os.Remove(permanentSocket)

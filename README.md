@@ -19,18 +19,19 @@ Using SSH Guardian Agent requires installation both on your local machine (the o
 1. Install the following dependencies:
   * OpenSSH client
   * ssh-askpass (MacOS users can use the [following port](https://github.com/theseal/ssh-askpass))
-2. Obtain the [latest release](https://github.com/dimakogan/ssh/releases/latest) for your platform. 
+2. Obtain the [latest release](https://github.com/StanfordSNR/guardian-agent/releases/latest) for your platform. 
 Alternatively, you may opt to [build from source](#building).
-3. Extract the two binaries (`sshguard` and `sshfwdstub`) from the tarball to a directory in the user's PATH.
+3. Extract the two binaries (`ssh-guard-agent` and `ssh-fwd-stub`) from the
+   tarball to a directory in the user's PATH.
 
 ## Building from Source
 1. [Install go](https://golang.org/doc/install)
 2. Get and build the sources:
 ```
-go get github.com/dimakogan/ssh/gossh/sshguard
-go get github.com/dimakogan/ssh/gossh/sshfwdstub
+go get github.com/StanfordSNR/guardian-agent/cmd/ssh-guard-agent
+go get github.com/StanfordSNR/guardian-agent/cmd/ssh-fwd-stub
 ```
-3. The binaries (`sshguard` and `sshfwdstub`) should be found in `$GOPATH/bin`.
+3. The binaries (`ssh-guard-agent` and `ssh-fwd-stub`) should be found in `$GOPATH/bin`.
 
 ## Basic Usage
 
@@ -40,23 +41,23 @@ are installed on the remote machine.
 Start an SSH session on a remote machine with secure agent forwarding enabled:
 
 ```
-[local]$ sshguard -A <remote>
+[local]$ ssh-guard-agent -A <remote>
 ```  
 
 
 To use SSH remotely with the forwarded agent:
 ```
-[remote]$ sshguard -d <server> [command]
+[remote]$ ssh-guard-agent -d <server> [command]
 ```
 
 This should trigger a local graphical consent prompt explicitly identifying `remote`, `server` and `command`.
 
 ### Stub location
 
-If the `sshfwdstub` is not installed in the user's `PATH` on the remote machine, its location must be specified when setting up secure agent forwarding from the local machine:
+If the `ssh-fwd-stub` is not installed in the user's `PATH` on the remote machine, its location must be specified when setting up secure agent forwarding from the local machine:
 
 ```
-[local]$ sshguard -A --stub=<PATH-TO-STUB> <remote>
+[local]$ ssh-guard-agent -A --stub=<PATH-TO-STUB> <remote>
 ```
 
 ## Advanced Usage
@@ -65,7 +66,7 @@ If the `sshfwdstub` is not installed in the user's `PATH` on the remote machine,
 To enable secure agent forwarding to a remote machine without starting an interactive session on the remote host:
 
 ```
-[local]$ sshguard -N -A <remote>
+[local]$ ssh-guard-agent -N -A <remote>
 ```
 
 ### Prompt types
@@ -83,7 +84,7 @@ Specifying additional ssh arguments is currently not supported on the remote hos
 
 ## Troubleshooting
 
-In case of [unexpected behavior](https://en.wikipedia.org/wiki/Bug_(software)), please consider opening an issue in our [issue tracker](https://github.com/dimakogan/ssh/issues).
+In case of [unexpected behavior](https://en.wikipedia.org/wiki/Bug_(software)), please consider opening an issue in our [issue tracker](https://github.com/StanfordSNR/guardian-agent/issues).
 We'd also greatly appreciate if you could run the tool in debug mode by setting the `--debug` and `--logfile=<LOG-FILE>` flags and attach the log file to the issue.
 
 ### Common issues

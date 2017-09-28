@@ -1,4 +1,4 @@
-package client
+package guardianagent
 
 import (
 	"bytes"
@@ -11,7 +11,6 @@ import (
 	"path"
 	"sync"
 
-	"github.com/dimakogan/ssh/gossh/common"
 	"github.com/hashicorp/yamux"
 	"golang.org/x/crypto/ssh"
 )
@@ -30,24 +29,24 @@ type DelegatedClient struct {
 }
 
 func findGuardSocket() (string, error) {
-	locations := []string{os.Getenv("SSH_AUTH_SOCK"), path.Join(common.UserRuntimeDir(), common.AgentGuardSockName)}
+	locations := []string{os.Getenv("SSH_AUTH_SOCK"), path.Join(UserRuntimeDir(), AgentGuardSockName)}
 	for _, loc := range locations {
 		sock, err := net.Dial("unix", loc)
 		if err != nil {
 			continue
 		}
 		defer sock.Close()
-		query := common.AgentCExtensionMsg{
-			ExtensionType: common.AgentGuardExtensionType,
+		query := AgentCExtensionMsg{
+			ExtensionType: AgentGuardExtensionType,
 		}
 
-		err = common.WriteControlPacket(sock, common.MsgAgentCExtension, ssh.Marshal(query))
+		err = WriteControlPacket(sock, MsgAgentCExtension, ssh.Marshal(query))
 		if err != nil {
 			continue
 		}
 
-		msgNum, _, err := common.ReadControlPacket(sock)
-		if err == nil && msgNum == common.MsgAgentSuccess {
+		msgNum, _, err := ReadControlPacket(sock)
+		if err == nil && msgNum == MsgAgentSuccess {
 			sock.Close()
 			return loc, nil
 		}
@@ -149,28 +148,28 @@ func (dc *DelegatedClient) Run() error {
 	}
 	defer master.Close()
 
-	execReq := common.ExecutionRequestMessage{
+	execReq := ExecutionRequestMessage{
 		User:    dc.Username,
 		Command: dc.Cmd,
 		Server:  dc.HostPort,
 	}
 
 	execReqPacket := ssh.Marshal(execReq)
-	err = common.WriteControlPacket(master, common.MsgExecutionRequest, execReqPacket)
+	err = WriteControlPacket(master, MsgExecutionRequest, execReqPacket)
 	if err != nil {
 		return fmt.Errorf("Failed to send MsgExecutionRequest to proxy: %s", err)
 	}
 
 	// Wait for response before opening data connection
-	msgNum, msg, err := common.ReadControlPacket(master)
+	msgNum, msg, err := ReadControlPacket(master)
 	if err != nil {
 		return fmt.Errorf("Failed to get approval from agent: %s", err)
 	}
 	switch msgNum {
-	case common.MsgExecutionApproved:
+	case MsgExecutionApproved:
 		break
-	case common.MsgExecutionDenied:
-		var denyMsg common.ExecutionDeniedMessage
+	case MsgExecutionDenied:
+		var denyMsg ExecutionDeniedMessage
 		ssh.Unmarshal(msg, &denyMsg)
 		return fmt.Errorf("Execution denied by agent: %s", denyMsg.Reason)
 	default:
@@ -195,7 +194,7 @@ func (dc *DelegatedClient) Run() error {
 	if err != nil {
 		return fmt.Errorf("Failed to get transport stream: %s", err)
 	}
-	proxyTransport := common.CustomConn{Conn: pt}
+	proxyTransport := CustomConn{Conn: pt}
 	defer proxyTransport.Close()
 
 	sshClientConn, sshPipe := net.Pipe()
@@ -285,16 +284,16 @@ func (dc *DelegatedClient) Run() error {
 			return
 		}
 
-		msgNum, handoffPacket, err := common.ReadControlPacket(control)
-		handoffMsg := new(common.HandoffCompleteMessage)
+		msgNum, handoffPacket, err := ReadControlPacket(control)
+		handoffMsg := new(HandoffCompleteMessage)
 		switch msgNum {
-		case common.MsgHandoffComplete:
+		case MsgHandoffComplete:
 			if err = ssh.Unmarshal(handoffPacket, handoffMsg); err != nil {
 				done <- fmt.Errorf("Failed to unmarshal MsgHandshakeCompleted: %s", err)
 				return
 			}
-		case common.MsgHandoffFailed:
-			handoffFailedMsg := new(common.HandoffFailedMessage)
+		case MsgHandoffFailed:
+			handoffFailedMsg := new(HandoffFailedMessage)
 			ssh.Unmarshal(handoffPacket, handoffFailedMsg)
 			if debugClient {
 				log.Printf("Handoff Failed: %s", handoffFailedMsg.Msg)

@@ -1,4 +1,4 @@
-package policy
+package guardianagent
 
 type Scope struct {
 	ClientUsername  string `json:"ClientUsername"`

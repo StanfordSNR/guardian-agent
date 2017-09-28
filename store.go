@@ -1,4 +1,4 @@
-package policy
+package guardianagent
 
 import (
 	"encoding/json"

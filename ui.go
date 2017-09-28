@@ -1,4 +1,4 @@
-package common
+package guardianagent
 
 import (
 	"bufio"
@@ -14,22 +14,22 @@ import (
 	i "github.com/sternhenri/interact"
 )
 
-type Interact interface {
+type UI interface {
 	Ask(prompt Prompt) (int, error)
 	Inform(msg string)
 	AskPassword(msg string) ([]byte, error)
 }
 
-type Terminal struct{}
-type FancyTerminal struct{}
-type AskPass struct{}
+type TerminalUI struct{}
+type FancyTerminalUI struct{}
+type AskPassUI struct{}
 
 type Prompt struct {
 	Question string
 	Choices  []string
 }
 
-func (Terminal) Ask(params Prompt) (reply int, err error) {
+func (TerminalUI) Ask(params Prompt) (reply int, err error) {
 	reply = -1
 	var convErr error
 
@@ -43,11 +43,11 @@ func (Terminal) Ask(params Prompt) (reply int, err error) {
 	return
 }
 
-func (Terminal) Inform(msg string) {
+func (TerminalUI) Inform(msg string) {
 	fmt.Println(msg)
 }
 
-func (Terminal) AskPassword(msg string) ([]byte, error) {
+func (TerminalUI) AskPassword(msg string) ([]byte, error) {
 	fmt.Println(msg)
 	return gopass.GetPasswd()
 }
@@ -71,7 +71,7 @@ func mapToChoice(vs []string) []i.Choice {
 	return vsm
 }
 
-func (FancyTerminal) Ask(params Prompt) (reply int, err error) {
+func (FancyTerminalUI) Ask(params Prompt) (reply int, err error) {
 	var resp int64
 
 	i.Run(&i.Interact{
@@ -94,16 +94,16 @@ func (FancyTerminal) Ask(params Prompt) (reply int, err error) {
 	return
 }
 
-func (FancyTerminal) Inform(msg string) {
+func (FancyTerminalUI) Inform(msg string) {
 	fmt.Println(msg)
 }
 
-func (FancyTerminal) AskPassword(msg string) ([]byte, error) {
+func (FancyTerminalUI) AskPassword(msg string) ([]byte, error) {
 	fmt.Println(msg)
 	return gopass.GetPasswd()
 }
 
-func (AskPass) Ask(params Prompt) (reply int, err error) {
+func (AskPassUI) Ask(params Prompt) (reply int, err error) {
 	reply = -1
 	var convErr error
 
@@ -120,11 +120,11 @@ func (AskPass) Ask(params Prompt) (reply int, err error) {
 	return
 }
 
-func (AskPass) Inform(msg string) {
+func (AskPassUI) Inform(msg string) {
 	log.Printf(msg)
 }
 
-func (AskPass) AskPassword(msg string) ([]byte, error) {
+func (AskPassUI) AskPassword(msg string) ([]byte, error) {
 	cmd := exec.Command("ssh-askpass", msg)
 	out, err := cmd.Output()
 	if err != nil {

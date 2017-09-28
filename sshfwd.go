@@ -1,4 +1,4 @@
-package sshfwd
+package guardianagent
 
 import (
 	"bufio"
@@ -18,8 +18,6 @@ import (
 	"io/ioutil"
 
 	"strconv"
-
-	"github.com/dimakogan/ssh/gossh/common"
 )
 
 const debugSSHFwd = true
@@ -40,7 +38,7 @@ type SSHFwd struct {
 func (fwd *SSHFwd) SetupForwarding() error {
 	fwd.SSHArgs = append(fwd.SSHArgs,
 		fmt.Sprintf("-p %d", fwd.Port),
-		"-S", path.Join(common.UserTempDir(), strconv.Itoa(int(rand.Int31()))),
+		"-S", path.Join(UserTempDir(), strconv.Itoa(int(rand.Int31()))),
 		fmt.Sprintf("%s@%s", fwd.Username, fwd.Host))
 	remoteStub := exec.Command(fwd.SSHCmd, append(fwd.SSHArgs, "-M", fwd.RemoteStubName)...)
 	remoteStdErr, err := remoteStub.StderrPipe()
@@ -74,7 +72,7 @@ func (fwd *SSHFwd) SetupForwarding() error {
 		return fmt.Errorf("Failed to read remote socket path from stub: %s\n%s", err, allErr)
 	}
 
-	listener, bindAddr, err := common.CreateSocket("")
+	listener, bindAddr, err := CreateSocket("")
 	if err != nil {
 		return fmt.Errorf("Failed to listen on socket %s: %s", bindAddr, err)
 	}
@@ -141,8 +139,8 @@ func (fwd *SSHFwd) Accept() (net.Conn, error) {
 		client.Close()
 	}()
 	go func() {
-		msg := common.AgentForwardingNoticeMsg{Hostname: fwd.Host, Port: uint32(fwd.Port), Username: fwd.Username}
-		if err = common.WriteControlPacket(clientPipe, common.MsgAgentForwardingNotice, ssh.Marshal(msg)); err != nil {
+		msg := AgentForwardingNoticeMsg{Hostname: fwd.Host, Port: uint32(fwd.Port), Username: fwd.Username}
+		if err = WriteControlPacket(clientPipe, MsgAgentForwardingNotice, ssh.Marshal(msg)); err != nil {
 			log.Printf("Failed to send message to agent: %s", err)
 			return
 		}

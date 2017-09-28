@@ -12,9 +12,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/dimakogan/ssh/gossh/agent"
-	"github.com/dimakogan/ssh/gossh/client"
-	"github.com/dimakogan/ssh/gossh/sshfwd"
+	guardianagent "github.com/StanfordSNR/guardian-agent"
 	"github.com/kballard/go-shellquote"
 )
 
@@ -115,7 +113,7 @@ func main() {
 		if noCommand {
 			log.Fatalf("no command (-N) is not supported in delegated mode (-d)")
 		}
-		dc := client.DelegatedClient{
+		dc := guardianagent.DelegatedClient{
 			HostPort: fmt.Sprintf("%s:%d", host, port),
 			Username: username,
 			Cmd:      cmd,
@@ -137,15 +135,15 @@ func main() {
 
 	if forwardAgent {
 		policyConfig = os.ExpandEnv(policyConfig)
-		var ag *agent.Agent
+		var ag *guardianagent.Agent
 		if noCommand && promptType != "DISPLAY" {
-			ag, err = agent.New(policyConfig, agent.Terminal)
+			ag, err = guardianagent.NewGuardian(policyConfig, guardianagent.Terminal)
 		} else {
 			if os.Getenv("DISPLAY") == "" {
 				fmt.Fprintf(os.Stderr, "DISPLAY must be set for user prompts.\nEither set the DISPLAY environment variable or use -N.")
 				os.Exit(255)
 			}
-			ag, err = agent.New(policyConfig, agent.Display)
+			ag, err = guardianagent.NewGuardian(policyConfig, guardianagent.Display)
 		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s", err)
@@ -156,7 +154,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Failed to parse ssh_args: %s", err)
 			os.Exit(255)
 		}
-		sshFwd := sshfwd.SSHFwd{
+		sshFwd := guardianagent.SSHFwd{
 			SSHCmd:         sshCmd,
 			SSHArgs:        sshArgsArray,
 			Host:           host,

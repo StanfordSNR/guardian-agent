@@ -1,20 +1,18 @@
-package policy
+package guardianagent
 
 import (
 	"errors"
 	"fmt"
-
-	"github.com/dimakogan/ssh/gossh/common"
 )
 
 type Policy struct {
-	Store    *Store
-	Interact common.Interact
+	Store *Store
+	UI    UI
 }
 
 func (policy *Policy) RequestApproval(scope Scope, cmd string) error {
 	if policy.Store.IsAllowed(scope, cmd) {
-		policy.Interact.Inform(fmt.Sprintf("Request by %s@%s:%d to run '%s' on %s@%s auto approved by policy",
+		policy.UI.Inform(fmt.Sprintf("Request by %s@%s:%d to run '%s' on %s@%s auto approved by policy",
 			scope.ClientUsername, scope.ClientHostname,
 			scope.ClientPort, cmd, scope.ServiceUsername,
 			scope.ServiceHostname))
@@ -25,7 +23,7 @@ func (policy *Policy) RequestApproval(scope Scope, cmd string) error {
 		scope.ClientPort, cmd, scope.ServiceUsername,
 		scope.ServiceHostname)
 
-	prompt := common.Prompt{
+	prompt := Prompt{
 		Question: question,
 		Choices: []string{
 			"Disallow", "Allow once", "Allow forever",
@@ -35,7 +33,7 @@ func (policy *Policy) RequestApproval(scope Scope, cmd string) error {
 				scope.ServiceHostname),
 		},
 	}
-	resp, err := policy.Interact.Ask(prompt)
+	resp, err := policy.UI.Ask(prompt)
 	if err != nil {
 		return fmt.Errorf("Failed to get user approval: %s", err)
 	}
@@ -56,7 +54,7 @@ func (policy *Policy) RequestApproval(scope Scope, cmd string) error {
 
 func (policy *Policy) RequestApprovalForAllCommands(scope Scope) error {
 	if policy.Store.AreAllAllowed(scope) {
-		policy.Interact.Inform(fmt.Sprintf("Request by %s@%s:%d to run any command on %s@%s auto approved by policy",
+		policy.UI.Inform(fmt.Sprintf("Request by %s@%s:%d to run any command on %s@%s auto approved by policy",
 			scope.ClientUsername, scope.ClientHostname,
 			scope.ClientPort, scope.ServiceUsername, scope.ServiceHostname))
 		return nil
@@ -66,11 +64,11 @@ func (policy *Policy) RequestApprovalForAllCommands(scope Scope) error {
 		scope.ClientPort, scope.ServiceUsername,
 		scope.ServiceHostname)
 
-	prompt := common.Prompt{
+	prompt := Prompt{
 		Question: question,
 		Choices:  []string{"Disallow", "Allow for session", "Allow forever"},
 	}
-	resp, err := policy.Interact.Ask(prompt)
+	resp, err := policy.UI.Ask(prompt)
 
 	switch resp {
 	case 1:

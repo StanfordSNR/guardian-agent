@@ -1,7 +1,8 @@
 *.swp
 *.gitmodules
-/gossh/agent/agent
-/gossh/agent/agent.exe
-/gossh/sshfwdstub/sshfwdstub
+/cmd/ssh-guard-agent/ssh-guard-agent
+/cmd/ssh-guard-agent/ssh-guard-agent.exe
+/cmd/ssh-fwd-stub/ssh-fwd-stub
+/cmd/ssh-fwd-stub/ssh-fwd-stub.exe
 *.go~
 .vscode/
