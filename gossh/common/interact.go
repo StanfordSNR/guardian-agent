@@ -10,12 +10,14 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/howeyc/gopass"
 	i "github.com/sternhenri/interact"
 )
 
 type Interact interface {
 	Ask(prompt Prompt) (int, error)
 	Inform(msg string)
+	AskPassword(msg string) ([]byte, error)
 }
 
 type Terminal struct{}
@@ -43,6 +45,11 @@ func (Terminal) Ask(params Prompt) (reply int, err error) {
 
 func (Terminal) Inform(msg string) {
 	fmt.Println(msg)
+}
+
+func (Terminal) AskPassword(msg string) ([]byte, error) {
+	fmt.Println(msg)
+	return gopass.GetPasswd()
 }
 
 func formatPrompt(params Prompt) (formattedPrompt string) {
@@ -91,6 +98,11 @@ func (FancyTerminal) Inform(msg string) {
 	fmt.Println(msg)
 }
 
+func (FancyTerminal) AskPassword(msg string) ([]byte, error) {
+	fmt.Println(msg)
+	return gopass.GetPasswd()
+}
+
 func (AskPass) Ask(params Prompt) (reply int, err error) {
 	reply = -1
 	var convErr error
@@ -110,4 +122,13 @@ func (AskPass) Ask(params Prompt) (reply int, err error) {
 
 func (AskPass) Inform(msg string) {
 	log.Printf(msg)
+}
+
+func (AskPass) AskPassword(msg string) ([]byte, error) {
+	cmd := exec.Command("ssh-askpass", msg)
+	out, err := cmd.Output()
+	if err != nil {
+		return out, err
+	}
+	return []byte(strings.TrimSpace(string(out))), nil
 }

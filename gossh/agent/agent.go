@@ -1,8 +1,11 @@
 package agent
 
 import (
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -62,15 +65,63 @@ func New(policyConfigPath string, inType InputType) (*Agent, error) {
 		nil
 }
 
-func (agent *Agent) proxySSH(scope policy.Scope, toClient net.Conn, toServer net.Conn, control net.Conn, fil *ssh.Filter) error {
-	var auths []ssh.AuthMethod
-
-	realAgent, err := net.Dial("unix", agent.realAgentPath)
+func (agent *Agent) getKeyFileAuth(keyPath string) (ssh.Signer, error) {
+	buf, err := ioutil.ReadFile(keyPath)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	p, rest := pem.Decode(buf)
+	if len(rest) > 0 {
+		return nil, fmt.Errorf("Failed to decode key")
+	}
+	pBlock := pem.Block{
+		Bytes:   buf,
+		Type:    p.Type,
+		Headers: p.Headers,
+	}
+	if x509.IsEncryptedPEMBlock(&pBlock) {
+		password, err := agent.policy.Interact.AskPassword(fmt.Sprintf("Enter passphrase for key '%s'", keyPath))
+		rawkey, err := ssh.ParsePrivateKeyWithPassphrase(buf, password)
+		if err != nil {
+			return nil, err
+		}
+		return rawkey.(ssh.Signer), nil
+	}
+	// Non-encrypted key
+	key, err := ssh.ParsePrivateKey(buf)
+	if err != nil {
+		return nil, err
+	}
+	return key, nil
+}
+
+func (agent *Agent) getAuth(homeDir string) ssh.AuthMethod {
+	realAgent, err := net.Dial("unix", agent.realAgentPath)
+	if err == nil {
+		agentClient := sshAgent.NewClient(realAgent)
+		agentKeys, err := agentClient.List()
+		if err != nil && len(agentKeys) > 0 {
+			return ssh.PublicKeysCallback(agentClient.Signers)
+		}
 	}
 
-	auths = append(auths, ssh.PublicKeysCallback(sshAgent.NewClient(realAgent).Signers))
+	var signers []ssh.Signer
+	for _, keyFile := range []string{"identity", "id_dsa", "id_rsa", "id_ecdsa", "id_ed25519"} {
+		keyPath := path.Join(homeDir, ".ssh", keyFile)
+		if _, err := os.Stat(keyPath); os.IsNotExist(err) {
+			continue
+		}
+		signer, err := agent.getKeyFileAuth(keyPath)
+		if err != nil {
+			log.Printf("Error parsing private key: %s: %s", keyPath, err)
+			continue
+		}
+		signers = append(signers, signer)
+	}
+	return ssh.PublicKeys(signers...)
+}
+
+func (agent *Agent) proxySSH(scope policy.Scope, toClient net.Conn, toServer net.Conn, control net.Conn, fil *ssh.Filter) error {
 
 	curuser, err := user.Current()
 	if err != nil {
@@ -83,7 +134,7 @@ func (agent *Agent) proxySSH(scope policy.Scope, toClient net.Conn, toServer net
 	clientConfig := &ssh.ClientConfig{
 		User:            scope.ServiceUsername,
 		HostKeyCallback: kh,
-		Auth:            auths,
+		Auth:            []ssh.AuthMethod{agent.getAuth(curuser.HomeDir)},
 	}
 
 	meteredConnToServer := common.CustomConn{Conn: toServer}
