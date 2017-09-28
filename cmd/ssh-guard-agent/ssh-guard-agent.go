@@ -180,6 +180,8 @@ func main() {
 				done = true
 				sshFwd.Close()
 			}()
+		} else {
+			fmt.Println("Listening for incoming ssh agent requests...")
 		}
 
 		var c net.Conn
