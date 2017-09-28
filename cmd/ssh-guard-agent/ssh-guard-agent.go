@@ -103,6 +103,11 @@ func main() {
 		log.Printf("Host: %s, Port: %d, User: %s\n", host, port, username)
 	}
 
+	if !delegatedClient && !forwardAgent {
+		fmt.Fprintln(os.Stderr, "Either -A (forwarding) or -d (delegation) must be specified")
+		os.Exit(1)
+	}
+
 	if delegatedClient {
 		if sshCmd != "ssh" {
 			log.Fatalf("--ssh flag not supported when running in delegated mode (-d)")
