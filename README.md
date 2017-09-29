@@ -1,6 +1,8 @@
-# SSH Guardian Agent
+## SSH Guardian Agent
 
-SSH Guardian Agent is an SSH client providing secure SSH agent forwarding.
+Traditional ssh-agent forwarding [can](https://heipei.github.io/2015/02/26/SSH-Agent-Forwarding-considered-harmful/) [be](https://news.ycombinator.com/item?id=9425805) [dangerous](https://lyte.id.au/2012/03/19/ssh-agent-forwarding-is-a-bug/): the local ssh-agent signs unauthenticated forwarded challenges using the user's private key. A compromised intermediary can send rogue challenges and use the user's identity to authenticate to other servers or to run unauthorized commands.
+
+SSH Guardian Agent is an SSH client providing secure SSH agent forwarding. A user first uses the `ssh-guard-agent` client to connect from the local machine, on which she stores her private SSH keys, to an intermediary machine (e.g., on AWS). She can then use `ssh-guard-agent` on the intermediary machine to establish SSH connections to other servers. The local `ssh-guard-agent` verifies the identity of the **intermediary**, the **remote server** and the **command**, either by prompting the user or based on a stored security policy.
 
 ![Example](animation.gif)
 
@@ -17,7 +19,7 @@ SSH Guardian Agent is an SSH client providing secure SSH agent forwarding.
 * [Development](#development)
 
 ## Installation
-Using SSH Guardian Agent requires installation both on your local machine (the one with your SSH private keys) and on each of the remote machines you want to securely forward SSH agent to (the machines on which you want to run an SSH client without having the keys on them). No installation is required on the server side.
+Using SSH Guardian Agent requires installation both on your local machine (the one with your SSH private keys) and on each of the intermediary machines you want to securely forward SSH agent to (the machines on which you want to run an SSH client without having the keys on them). No installation is required on the server side.
 
 1. Install the following dependencies:
   * OpenSSH client
@@ -34,43 +36,47 @@ Alternatively, you may opt to [build from source](#building).
 go get github.com/StanfordSNR/guardian-agent/cmd/ssh-guard-agent
 go get github.com/StanfordSNR/guardian-agent/cmd/ssh-fwd-stub
 ```
-3. The binaries (`ssh-guard-agent` and `ssh-fwd-stub`) should be found in `$GOPATH/bin`.
+3. Copy the built binaries (`ssh-guard-agent` and `ssh-fwd-stub`) from `$GOPATH/bin` to a directory in the user's PATH.
 
 ## Basic Usage
 
 Make sure the client is installed on your local machine and both the client and the stub
-are installed on the remote machine.
+are installed on the intermediary machine.
 
-Start an SSH session on a remote machine with secure agent forwarding enabled:
+Start an SSH session on an intermediary machine with secure agent forwarding enabled:
 
 ```
-[local]$ ssh-guard-agent -A <remote>
+[local]$ ssh-guard-agent -A <intermediary>
 ```  
 
 
-To use SSH remotely with the forwarded agent:
+To use the the forwarded agent on the intermediary:
 ```
-[remote]$ ssh-guard-agent -d <server> [command]
+[intermediary]$ ssh-guard-agent -d <server> [command]
 ```
 
-This should trigger a local graphical consent prompt explicitly identifying `remote`, `server` and `command`.
+This should trigger a local graphical consent prompt explicitly identifying `intermediary`, `server` and `command`.
 
 ### Stub location
 
-If the `ssh-fwd-stub` is not installed in the user's `PATH` on the remote machine, its location must be specified when setting up secure agent forwarding from the local machine:
+If the `ssh-fwd-stub` is not installed in the user's `PATH` on the intermediary machine, its location must be specified when setting up secure agent forwarding from the local machine:
 
 ```
-[local]$ ssh-guard-agent -A --stub=<PATH-TO-STUB> <remote>
+[local]$ ssh-guard-agent -A --stub=<PATH-TO-STUB> <intermediary>
 ```
 
 ## Advanced Usage
 
 ### Forwarding only
-To enable secure agent forwarding to a remote machine without starting an interactive session on the remote host:
+To enable secure agent forwarding to a intermediary machine without starting an interactive session on the intermediary host:
 
 ```
 [local]$ ssh-guard-agent -N -A <remote>
 ```
+
+The user can then use ``ssh-guard-agent`` on the intermediary machine in any other session on the intermediary host (e.g., by connecting to the intermediary using OpenSSH or Mosh).
+
+![Example](animationN.gif)
 
 ### Prompt types
 
@@ -83,17 +89,20 @@ Therefore, terminal-based prompt may only be used when [forwarding only](#forwar
 
 When setting up secure agent forwarding, the default SSH client on the local machine is used for setting up the connection. This requires `ssh` to be found in the user's `PATH`. To specify an alternative SSH client or specifying additional argument to the client, the `--ssh` and `--ssh_args` command-line flags may be used. 
 
-Specifying additional ssh arguments is currently not supported on the remote host (i.e., when using the `-d` flag).  
+Specifying additional ssh arguments is currently not supported on the intermediary host (i.e., when using the `-d` 
+flag).  
+
+### Persistent sessions using autossh
+`ssh-guard-agent` can be run persistently using [autossh](https://linux.die.net/man/1/autossh)
+
+```
+AUTOSSH_PATH="ssh-guard-agent" autossh -M 0 -A [-N] <intermediary>
+```
 
 ## Troubleshooting
 
 In case of [unexpected behavior](https://en.wikipedia.org/wiki/Bug_(software)), please consider opening an issue in our [issue tracker](https://github.com/StanfordSNR/guardian-agent/issues).
 We'd also greatly appreciate if you could run the tool in debug mode by setting the `--debug` and `--logfile=<LOG-FILE>` flags and attach the log file to the issue.
-
-### Common issues
-
-* Make sure the remote machine (or localhost if you are testing locally) has a running ssh daemon
-* Make sure your keys to the remote are added to your ssh-agent so you can connect
 
 ## Development
 [Detailed Design](doc/design.md)
