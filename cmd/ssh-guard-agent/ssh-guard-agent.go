@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/user"
+	"runtime"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
@@ -144,7 +145,7 @@ func main() {
 		if noCommand && promptType != "DISPLAY" {
 			ag, err = guardianagent.NewGuardian(policyConfig, guardianagent.Terminal)
 		} else {
-			if os.Getenv("DISPLAY") == "" {
+			if (runtime.GOOS == "linux") && (os.Getenv("DISPLAY") == "") {
 				fmt.Fprintf(os.Stderr, "DISPLAY must be set for user prompts.\nEither set the DISPLAY environment variable or use -N.")
 				os.Exit(255)
 			}
