@@ -2,6 +2,9 @@
 
 SSH Guardian Agent is an SSH client providing secure SSH agent forwarding.
 
+![Example](animation.gif)
+
+
 * [Installation](#installation)
 * [Building](#building)
 * [Basic Usage](#basic-usage)
