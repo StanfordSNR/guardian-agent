@@ -1,3 +1,10 @@
+---
+**WARNING!**
+
+This tool is in beta and we're working to improve it! Feedback is greatly appreciated, but please use at your own risk!
+
+---
+
 ## SSH Guardian Agent
 
 Traditional ssh-agent forwarding [can](https://heipei.github.io/2015/02/26/SSH-Agent-Forwarding-considered-harmful/) [be](https://news.ycombinator.com/item?id=9425805) [dangerous](https://lyte.id.au/2012/03/19/ssh-agent-forwarding-is-a-bug/): the local ssh-agent signs unauthenticated forwarded challenges using the user's private key. A compromised intermediary can send rogue challenges and use the user's identity to authenticate to other servers or to run unauthorized commands.
