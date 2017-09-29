@@ -6,17 +6,17 @@ SSH Guardian Agent is an SSH client providing secure SSH agent forwarding. A use
 
 ![Example](animation.gif)
 
-
 * [Installation](#installation)
-* [Building](#building)
+* [Building from Source](#building-from-source)
 * [Basic Usage](#basic-usage)
 * [Advanced Usage](#advanced-usage)
-   * [Forwarding only](#forwarding-only)
-   * [Prompt types](#prompt-types)
-   * [Customizing the SSH command](#customizing-the-ssh-command)
-   * [Stub location](#stub-location)
+  * [Forwarding only](#forwarding-only)
+  * [Prompt types](#prompt-types)
+  * [Customizing the SSH command](#customizing-the-ssh-command)
+  * [Persistent sessions using autossh](#persistent-sessions-using-autossh)
 * [Troubleshooting](#troubleshooting)
 * [Development](#development)
+
 
 ## Installation
 Using SSH Guardian Agent requires installation both on your local machine (the one with your SSH private keys) and on each of the intermediary machines you want to securely forward SSH agent to (the machines on which you want to run an SSH client without having the keys on them). No installation is required on the server side.
