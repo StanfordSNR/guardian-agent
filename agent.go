@@ -78,7 +78,7 @@ func (agent *Agent) getKeyFileAuth(keyPath string) (ssh.Signer, error) {
 		Headers: p.Headers,
 	}
 	if x509.IsEncryptedPEMBlock(&pBlock) {
-		password, err := agent.policy.UI.AskPassword(fmt.Sprintf("Enter passphrase for key '%s'", keyPath))
+		password, err := agent.policy.UI.AskPassword(fmt.Sprintf("Enter passphrase for key '%s':", keyPath))
 		rawkey, err := ssh.ParsePrivateKeyWithPassphrase(buf, password)
 		if err != nil {
 			return nil, err
