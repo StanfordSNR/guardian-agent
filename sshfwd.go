@@ -41,7 +41,6 @@ func (fwd *SSHFwd) SetupForwarding() error {
 		"-S", path.Join(UserTempDir(), strconv.Itoa(int(rand.Int31()))),
 		fmt.Sprintf("%s@%s", fwd.Username, fwd.Host))
 	remoteStub := exec.Command(fwd.SSHCmd, append(fwd.SSHArgs, "-M", fwd.RemoteStubName)...)
-	log.Printf("%v", remoteStub)
 	remoteStdErr, err := remoteStub.StderrPipe()
 	if err != nil {
 		return fmt.Errorf("Failed to get ssh stderr: %s", err)

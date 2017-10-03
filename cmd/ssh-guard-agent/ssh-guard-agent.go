@@ -20,7 +20,6 @@ import (
 const debugClient = true
 
 func main() {
-	fmt.Println(os.Args)
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [-AdN] [-p port] [-prompt=DISPLAY|TERMINAL] [user@]hostname [command]\n", os.Args[0])
 		flag.PrintDefaults()
