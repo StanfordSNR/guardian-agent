@@ -94,7 +94,22 @@ func (dc *DelegatedClient) startCommand(conn *ssh.Client, cmd string) (err error
 		return err
 	}
 
-	if err = dc.session.Start(cmd); err != nil {
+	if cmd == "" {
+		// Set up terminal modes
+		modes := ssh.TerminalModes{
+			ssh.ECHO:          0,     // disable echoing
+			ssh.TTY_OP_ISPEED: 14400, // input speed = 14.4kbaud
+			ssh.TTY_OP_OSPEED: 14400, // output speed = 14.4kbaud
+		}
+		// Request pseudo terminal
+		if err := dc.session.RequestPty("xterm", 40, 80, modes); err != nil {
+			return fmt.Errorf("request for pseudo terminal failed: %s", err)
+		}
+		err = dc.session.Shell()
+	} else {
+		err = dc.session.Start(cmd)
+	}
+	if err != nil {
 		dc.session.Close()
 		return err
 	}
