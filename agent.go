@@ -1,6 +1,8 @@
 package guardianagent
 
 import (
+	"bytes"
+	"crypto/md5"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
@@ -10,6 +12,7 @@ import (
 	"net"
 	"os"
 	"os/user"
+	"strings"
 
 	"path"
 
@@ -119,19 +122,107 @@ func (agent *Agent) getAuth(homeDir string) ssh.AuthMethod {
 	return ssh.PublicKeys(signers...)
 }
 
-func (agent *Agent) proxySSH(scope Scope, toClient net.Conn, toServer net.Conn, control net.Conn, fil *ssh.Filter) error {
+// Adapted from https://github.com/coreos/fleet/blob/master/ssh/known_hosts.go
+func putHostKey(knownHostsPath string, addr string, hostKey ssh.PublicKey) error {
+	// Make necessary directories if needed
+	err := os.MkdirAll(path.Dir(knownHostsPath), 0700)
+	if err != nil {
+		return err
+	}
 
+	out, err := os.OpenFile(knownHostsPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = out.Write(renderHostLine(addr, hostKey))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func renderHostLine(addr string, key ssh.PublicKey) []byte {
+	keyByte := ssh.MarshalAuthorizedKey(key)
+	// allocate line space in advance
+	length := len(addr) + 1 + len(keyByte)
+	line := make([]byte, 0, length)
+
+	w := bytes.NewBuffer(line)
+	w.Write([]byte(addr))
+	w.WriteByte(' ')
+	w.Write(keyByte)
+	return w.Bytes()
+}
+
+const (
+	warningRemoteHostChanged = `@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!
+Someone could be eavesdropping on you right now (man-in-the-middle attack)!
+It is also possible that a host key has just been changed.
+The fingerprint for the %v key sent by the remote host is
+%v.
+Please contact your system administrator.
+Add correct host key in %v to get rid of this message.
+Host key verification failed.
+	`
+	promptToTrustHost = `The authenticity of host '%v' can't be established.
+%v key fingerprint is %v.
+Are you sure you want to continue connecting (yes/no)? `
+)
+
+// md5String returns a formatted string representing the given md5Sum in hex
+func md5String(md5Sum [16]byte) string {
+	md5Str := fmt.Sprintf("% x", md5Sum)
+	md5Str = strings.Replace(md5Str, " ", ":", -1)
+	return md5Str
+}
+
+func (agent *Agent) hostKeyCallback(hostname string, remote net.Addr, key ssh.PublicKey) error {
 	curuser, err := user.Current()
 	if err != nil {
 		return fmt.Errorf("Failed to get current user: %s", err)
 	}
-	kh, err := knownhosts.New(path.Join(curuser.HomeDir, ".ssh", "known_hosts"))
+	knownHostsPath := path.Join(curuser.HomeDir, ".ssh", "known_hosts")
+	kh, err := knownhosts.New(knownHostsPath)
 	if err != nil {
 		return err
 	}
+	err = kh(hostname, remote, key)
+
+	if err == nil {
+		return nil
+	}
+
+	if _, ok := err.(*knownhosts.RevokedError); ok {
+		return err
+	}
+
+	keyFingerprintStr := md5String(md5.Sum(key.Marshal()))
+
+	if kErr, ok := err.(*knownhosts.KeyError); ok && len(kErr.Want) > 0 {
+		agent.policy.UI.Alert(fmt.Sprintf(warningRemoteHostChanged, key.Type(), keyFingerprintStr, knownHostsPath))
+		return kErr
+	}
+
+	if agent.policy.UI.Confirm(fmt.Sprintf(promptToTrustHost, hostname, key.Type(), keyFingerprintStr)) {
+		return putHostKey(knownHostsPath, knownhosts.Normalize(hostname), key)
+	}
+
+	return &knownhosts.KeyError{}
+}
+
+func (agent *Agent) proxySSH(scope Scope, toClient net.Conn, toServer net.Conn, control net.Conn, fil *ssh.Filter) error {
+	curuser, err := user.Current()
+	if err != nil {
+		return fmt.Errorf("Failed to get current user: %s", err)
+	}
 	clientConfig := &ssh.ClientConfig{
 		User:            scope.ServiceUsername,
-		HostKeyCallback: kh,
+		HostKeyCallback: agent.hostKeyCallback,
 		Auth:            []ssh.AuthMethod{agent.getAuth(curuser.HomeDir)},
 	}
 

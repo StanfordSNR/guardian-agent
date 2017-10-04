@@ -16,7 +16,9 @@ import (
 
 type UI interface {
 	Ask(prompt Prompt) (int, error)
+	Confirm(msg string) bool
 	Inform(msg string)
+	Alert(msg string)
 	AskPassword(msg string) ([]byte, error)
 }
 
@@ -43,8 +45,18 @@ func (TerminalUI) Ask(params Prompt) (reply int, err error) {
 	return
 }
 
+func (tui TerminalUI) Confirm(msg string) bool {
+	prompt := Prompt{Question: msg, Choices: []string{"Yes", "No"}}
+	ans, err := tui.Ask(prompt)
+	return err != nil && ans == 1
+}
+
 func (TerminalUI) Inform(msg string) {
 	fmt.Println(msg)
+}
+
+func (TerminalUI) Alert(msg string) {
+	fmt.Fprintln(os.Stderr, msg)
 }
 
 func (TerminalUI) AskPassword(msg string) ([]byte, error) {
@@ -98,9 +110,19 @@ func (FancyTerminalUI) Inform(msg string) {
 	fmt.Println(msg)
 }
 
+func (FancyTerminalUI) Alert(msg string) {
+	fmt.Fprintln(os.Stderr, msg)
+}
+
 func (FancyTerminalUI) AskPassword(msg string) ([]byte, error) {
 	fmt.Println(msg)
 	return gopass.GetPasswd()
+}
+
+func (tui FancyTerminalUI) Confirm(msg string) bool {
+	prompt := Prompt{Question: msg, Choices: []string{"Yes", "No"}}
+	ans, err := tui.Ask(prompt)
+	return err != nil && ans == 1
 }
 
 func (AskPassUI) Ask(params Prompt) (reply int, err error) {
@@ -124,6 +146,11 @@ func (AskPassUI) Inform(msg string) {
 	log.Printf(msg)
 }
 
+func (AskPassUI) Alert(msg string) {
+	cmd := exec.Command("ssh-askpass", msg)
+	cmd.Run()
+}
+
 func (AskPassUI) AskPassword(msg string) ([]byte, error) {
 	cmd := exec.Command("ssh-askpass", msg)
 	out, err := cmd.Output()
@@ -131,4 +158,15 @@ func (AskPassUI) AskPassword(msg string) ([]byte, error) {
 		return out, err
 	}
 	return []byte(strings.TrimSpace(string(out))), nil
+}
+
+func (apui AskPassUI) Confirm(msg string) bool {
+	cmd := exec.Command("ssh-askpass", msg)
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+
+	outStr := strings.ToLower(strings.TrimSpace(string(out)))
+	return len(outStr) == 0 || outStr == "yes"
 }
