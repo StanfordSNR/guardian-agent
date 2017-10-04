@@ -48,7 +48,7 @@ func (TerminalUI) Ask(params Prompt) (reply int, err error) {
 func (tui TerminalUI) Confirm(msg string) bool {
 	prompt := Prompt{Question: msg, Choices: []string{"Yes", "No"}}
 	ans, err := tui.Ask(prompt)
-	return err != nil && ans == 1
+	return err == nil && ans == 1
 }
 
 func (TerminalUI) Inform(msg string) {
@@ -122,7 +122,7 @@ func (FancyTerminalUI) AskPassword(msg string) ([]byte, error) {
 func (tui FancyTerminalUI) Confirm(msg string) bool {
 	prompt := Prompt{Question: msg, Choices: []string{"Yes", "No"}}
 	ans, err := tui.Ask(prompt)
-	return err != nil && ans == 1
+	return err == nil && ans == 1
 }
 
 func (AskPassUI) Ask(params Prompt) (reply int, err error) {
