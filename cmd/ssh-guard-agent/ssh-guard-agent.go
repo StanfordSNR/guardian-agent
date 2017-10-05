@@ -58,6 +58,12 @@ func main() {
 	var logFile string
 	flag.StringVar(&logFile, "logfile", "", "log filename")
 
+	var stdinNull bool
+	flag.BoolVar(&stdinNull, "n", false, "Redirects stdin from /dev/null")
+
+	var forceTty bool
+	flag.BoolVar(&forceTty, "tt", false, "Forces TTY allocation")
+
 	flag.Parse()
 	if flag.NArg() < 1 {
 		flag.Usage()
@@ -97,7 +103,11 @@ func main() {
 
 	var cmd string
 	if flag.NArg() >= 2 {
-		cmd = strings.Join(flag.Args()[1:], " ")
+		cmdArgs := flag.Args()[1:]
+		if cmdArgs[0] == "--" {
+			cmdArgs = cmdArgs[1:]
+		}
+		cmd = strings.Join(cmdArgs, " ")
 	}
 
 	if debugClient {
@@ -120,9 +130,11 @@ func main() {
 			log.Fatalf("no command (-N) is not supported in delegated mode (-d)")
 		}
 		dc := guardianagent.DelegatedClient{
-			HostPort: fmt.Sprintf("%s:%d", host, port),
-			Username: username,
-			Cmd:      cmd,
+			HostPort:  fmt.Sprintf("%s:%d", host, port),
+			Username:  username,
+			Cmd:       cmd,
+			ForceTty:  forceTty,
+			StdinNull: stdinNull,
 		}
 		err = dc.Run()
 		if err == nil {

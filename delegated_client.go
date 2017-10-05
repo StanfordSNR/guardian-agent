@@ -13,14 +13,17 @@ import (
 
 	"github.com/hashicorp/yamux"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/terminal"
 )
 
 const debugClient = true
 
 type DelegatedClient struct {
-	HostPort string
-	Username string
-	Cmd      string
+	HostPort  string
+	Username  string
+	Cmd       string
+	StdinNull bool
+	ForceTty  bool
 
 	session *ssh.Session
 	stdin   io.WriteCloser
@@ -94,17 +97,21 @@ func (dc *DelegatedClient) startCommand(conn *ssh.Client, cmd string) (err error
 		return err
 	}
 
-	if cmd == "" {
+	if cmd == "" || dc.ForceTty {
 		// Set up terminal modes
 		modes := ssh.TerminalModes{
-			ssh.ECHO:          0,     // disable echoing
-			ssh.TTY_OP_ISPEED: 14400, // input speed = 14.4kbaud
-			ssh.TTY_OP_OSPEED: 14400, // output speed = 14.4kbaud
+			ssh.ECHO: 0, // disable echoing
+		}
+		w, h, err := terminal.GetSize(int(os.Stdin.Fd()))
+		if err != nil {
+			return fmt.Errorf("failed to get terminal size: %s", err)
 		}
 		// Request pseudo terminal
-		if err := dc.session.RequestPty("xterm", 40, 80, modes); err != nil {
+		if err := dc.session.RequestPty(os.Getenv("TERM"), w, h, modes); err != nil {
 			return fmt.Errorf("request for pseudo terminal failed: %s", err)
 		}
+	}
+	if cmd == "" {
 		err = dc.session.Shell()
 	} else {
 		err = dc.session.Start(cmd)
@@ -120,7 +127,9 @@ func (dc *DelegatedClient) startCommand(conn *ssh.Client, cmd string) (err error
 func (dc *DelegatedClient) resume() error {
 	defer dc.session.Close()
 	go func() {
-		io.Copy(dc.stdin, os.Stdin)
+		if !dc.StdinNull {
+			io.Copy(dc.stdin, os.Stdin)
+		}
 		dc.stdin.Close()
 	}()
 	done := make(chan error)
