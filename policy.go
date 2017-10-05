@@ -66,7 +66,7 @@ func (policy *Policy) RequestApprovalForAllCommands(scope Scope) error {
 
 	prompt := Prompt{
 		Question: question,
-		Choices:  []string{"Disallow", "Allow for session", "Allow forever"},
+		Choices:  []string{"Disallow", "Allow once", "Allow forever"},
 	}
 	resp, err := policy.UI.Ask(prompt)
 
