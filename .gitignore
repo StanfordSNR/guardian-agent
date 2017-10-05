@@ -1,8 +1,10 @@
 *.swp
 *.gitmodules
-/cmd/ssh-guard-agent/ssh-guard-agent
-/cmd/ssh-guard-agent/ssh-guard-agent.exe
-/cmd/ssh-fwd-stub/ssh-fwd-stub
-/cmd/ssh-fwd-stub/ssh-fwd-stub.exe
+/cmd/sga-guard/sga-guard
+/cmd/sga-guard/sga-guard.exe
+/cmd/sga-run/sga-run
+/cmd/sga-run/sga-run.exe
+/cmd/sga-stub/sga-stub
+/cmd/sga-stub/sga-stub.exe
 *.go~
 .vscode/
