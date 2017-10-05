@@ -23,7 +23,7 @@ import (
 const debugSSHFwd = true
 
 type SSHFwd struct {
-	SSHCmd         string
+	SSHProgram     string
 	SSHArgs        []string
 	Host           string
 	Port           int
@@ -40,7 +40,7 @@ func (fwd *SSHFwd) SetupForwarding() error {
 		fmt.Sprintf("-p %d", fwd.Port),
 		"-S", path.Join(UserTempDir(), strconv.Itoa(int(rand.Int31()))),
 		fmt.Sprintf("%s@%s", fwd.Username, fwd.Host))
-	remoteStub := exec.Command(fwd.SSHCmd, append(fwd.SSHArgs, "-M", fwd.RemoteStubName)...)
+	remoteStub := exec.Command(fwd.SSHProgram, append(fwd.SSHArgs, "-M", fwd.RemoteStubName)...)
 	remoteStdErr, err := remoteStub.StderrPipe()
 	if err != nil {
 		return fmt.Errorf("Failed to get ssh stderr: %s", err)
@@ -87,7 +87,7 @@ func (fwd *SSHFwd) SetupForwarding() error {
 		fwd.listener.Close()
 	}()
 
-	child := exec.Command(fwd.SSHCmd,
+	child := exec.Command(fwd.SSHProgram,
 		append(fwd.SSHArgs, "-o ExitOnForwardFailure yes", "-T", "-O", "forward", fmt.Sprintf("-R %s:%s", string(remoteSocket), bindAddr))...)
 	_, err = child.Output()
 	if err != nil {
@@ -119,7 +119,7 @@ func (fwd *SSHFwd) Run(cmd string) error {
 	for _, s := range fwd.SSHArgs {
 		log.Printf(s)
 	}
-	child := exec.Command(fwd.SSHCmd, fwd.SSHArgs...)
+	child := exec.Command(fwd.SSHProgram, fwd.SSHArgs...)
 
 	child.Stderr = os.Stderr
 	child.Stdout = os.Stdout
@@ -155,7 +155,7 @@ func (fwd *SSHFwd) Accept() (net.Conn, error) {
 }
 
 func (fwd *SSHFwd) Close() {
-	child := exec.Command(fwd.SSHCmd, append(fwd.SSHArgs, "-O exit")...)
+	child := exec.Command(fwd.SSHProgram, append(fwd.SSHArgs, "-O exit")...)
 	child.Run()
 	os.Remove(fwd.localSocket)
 	fwd.listener.Close()
