@@ -26,7 +26,7 @@ type SSHFwd struct {
 	SSHProgram     string
 	SSHArgs        []string
 	Host           string
-	Port           int
+	Port           uint
 	Username       string
 	RemoteStubName string
 
@@ -69,7 +69,10 @@ func (fwd *SSHFwd) SetupForwarding() error {
 	remoteSocket, _, err := stubReader.ReadLine()
 	if err != nil {
 		allErr, _ := ioutil.ReadAll(remoteStdErr)
-		return fmt.Errorf("Failed to read remote socket path from stub: %s\n%s", err, allErr)
+		if err == io.EOF {
+			return fmt.Errorf("%s", allErr)
+		}
+		return fmt.Errorf("%s\n%s", err, allErr)
 	}
 
 	listener, bindAddr, err := CreateSocket("")

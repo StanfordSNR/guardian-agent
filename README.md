@@ -29,6 +29,7 @@ SSH Guardian Agent is an SSH client providing secure SSH agent forwarding. A use
   * [Prompt types](#prompt-types)
   * [Customizing the SSH command](#customizing-the-ssh-command)
   * [Persistent sessions using autossh](#persistent-sessions-using-autossh)
+  * [Stub location](#stub-location)
 * [Troubleshooting](#troubleshooting)
 * [Development](#development)
 
@@ -41,7 +42,7 @@ Using SSH Guardian Agent requires installation both on your local machine (the o
   * ssh-askpass (MacOS users can use the [following port](https://github.com/theseal/ssh-askpass))
 2. Obtain the [latest release](https://github.com/StanfordSNR/guardian-agent/releases/latest) for your platform. 
 Alternatively, you may opt to [build from source](#building).
-3. Extract the two binaries (`sga-guard`, `sga-run`, and `sga-stub`) from the
+3. Extract the binaries (`sga-guard`, `sga-run`, and `sga-stub`) from the
    tarball to a directory in the user's PATH.
 
 ## Building from Source
@@ -70,14 +71,6 @@ To use the the forwarded agent on the intermediary:
 ```
 
 This should trigger a local graphical consent prompt explicitly identifying `intermediary`, `server` and `command`.
-
-### Stub location
-
-If the `sga-stub` is not installed in the user's `PATH` on the intermediary machine, its location must be specified when setting up secure agent forwarding from the local machine:
-
-```
-[local]$ sga-guard --stub=<PATH-TO-STUB> <intermediary>
-```
 
 ## Advanced Usage
 
@@ -109,6 +102,14 @@ To specify an alternative SSH client or specifying additional argument to the cl
 
 ```
 AUTOSSH_PATH="sga-guard" autossh -M 0 [-N] <intermediary>
+```
+
+### Stub location
+
+If the `sga-stub` is not installed in the user's `PATH` on the intermediary machine, its location must be specified when setting up secure agent forwarding from the local machine:
+
+```
+[local]$ sga-guard --stub=<PATH-TO-STUB> <intermediary>
 ```
 
 ## Troubleshooting
