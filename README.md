@@ -83,7 +83,7 @@ This should trigger a local graphical consent prompt explicitly identifying
 `intermediary`, `server` and `command`.
 
 ### Common use cases
- Add these lines to your `~/.bashrc` file
+To use `sga-run` as a drop-in replacement for `ssh` on the intermediary host, add these lines to your `~/.bashrc` file (on the intermediary):
 
 ```
 alias sga-scp="scp -S sga-run"
