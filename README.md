@@ -105,8 +105,6 @@ The user can then use ``sga-run`` on the intermediary machine in any other
 session on the intermediary host (e.g., by connecting to the intermediary using
 OpenSSH or Mosh).
 
-![Example](animationN.gif)
-
 ### Prompt types
 
 Guardian agent supports two types of interactive prompts: graphical and
