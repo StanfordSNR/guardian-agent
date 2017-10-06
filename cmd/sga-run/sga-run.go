@@ -28,6 +28,9 @@ func main() {
 	var port int
 	flag.IntVar(&port, "p", 22, "Port to connect to on the remote host.")
 
+	var username string
+	flag.StringVar(&username, "l", "", "Specifies the user to log in as on the remote machine")
+
 	var logFile string
 	flag.StringVar(&logFile, "logfile", "", "log filename")
 
@@ -93,13 +96,13 @@ func main() {
 	}
 
 	userHost := strings.Split(flag.Args()[0], "@")
-	var username string
-	var host string
-	if len(userHost) > 1 {
-		username, host = userHost[0], userHost[1]
-	} else {
-		username = curuser.Username
-		host = userHost[0]
+	host := userHost[len(userHost)-1]
+	if username == "" {
+		if len(userHost) > 1 {
+			username = userHost[0]
+		} else {
+			username = curuser.Username
+		}
 	}
 
 	var cmd string

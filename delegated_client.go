@@ -107,7 +107,7 @@ func (dc *DelegatedClient) startCommand(conn *ssh.Client, cmd string) (err error
 			return fmt.Errorf("failed to get terminal size: %s", err)
 		}
 		// Request pseudo terminal
-		if err := dc.session.RequestPty(os.Getenv("TERM"), w, h, modes); err != nil {
+		if err := dc.session.RequestPty(os.Getenv("TERM"), h, w, modes); err != nil {
 			return fmt.Errorf("request for pseudo terminal failed: %s", err)
 		}
 	}
