@@ -6,8 +6,8 @@
 
 <span style="color:red">
 
-**This tool is in beta and we're working to improve it! 
-Feedback is greatly appreciated, but please use at your own risk!**
+**This tool is in beta and we're working to improve it.
+Feedback is greatly appreciated, but please use at your own risk.**
 
 </span>
 
