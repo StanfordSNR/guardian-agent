@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"path"
 	"sync"
 
@@ -19,11 +20,12 @@ import (
 const debugClient = true
 
 type DelegatedClient struct {
-	HostPort  string
-	Username  string
-	Cmd       string
-	StdinNull bool
-	ForceTty  bool
+	HostPort     string
+	Username     string
+	Cmd          string
+	ProxyCommand string
+	StdinNull    bool
+	ForceTty     bool
 
 	session *ssh.Session
 	stdin   io.WriteCloser
@@ -58,8 +60,9 @@ func findGuardSocket() (string, error) {
 }
 
 type settableWriter struct {
-	w  io.Writer
-	mu sync.Mutex
+	w    io.Writer
+	mu   sync.Mutex
+	werr error
 }
 
 func (sw *settableWriter) Write(p []byte) (n int, err error) {
@@ -69,7 +72,17 @@ func (sw *settableWriter) Write(p []byte) (n int, err error) {
 		return 0, errors.New("Writer is closed")
 	}
 
-	return sw.w.Write(p)
+	var wn int
+	wn, sw.werr = sw.w.Write(p)
+	return wn, sw.werr
+}
+
+func (sw *settableWriter) Close() error {
+	v, ok := sw.w.(io.Closer)
+	if ok {
+		return v.Close()
+	}
+	return nil
 }
 
 func (dc *DelegatedClient) startCommand(conn *ssh.Client, cmd string) (err error) {
@@ -154,13 +167,89 @@ func (dc *DelegatedClient) resume() error {
 	return errOut2
 }
 
+func getHandoffNextTransportByte(control net.Conn) (uint32, error) {
+	msgNum, handoffPacket, err := ReadControlPacket(control)
+	if err != nil {
+		return 0, err
+	}
+	handoffMsg := new(HandoffCompleteMessage)
+	switch msgNum {
+	case MsgHandoffComplete:
+		if err = ssh.Unmarshal(handoffPacket, handoffMsg); err != nil {
+			return 0, fmt.Errorf("Failed to unmarshal MsgHandshakeCompleted: %s", err)
+		}
+	case MsgHandoffFailed:
+		handoffFailedMsg := new(HandoffFailedMessage)
+		ssh.Unmarshal(handoffPacket, handoffFailedMsg)
+		if debugClient {
+			log.Printf("Handoff Failed: %s", handoffFailedMsg.Msg)
+		}
+		return 0, errors.New(handoffFailedMsg.Msg)
+	default:
+		return 0, fmt.Errorf("Unexpected msg: %d, when expecting MsgHandshakeCompleted", handoffPacket[0])
+	}
+
+	if debugClient {
+		log.Printf("Got handoffMsg.NextTransportByte: %d", handoffMsg.NextTransportByte)
+	}
+	return handoffMsg.NextTransportByte, nil
+}
+
+func syncBufferedTraffic(bufferedTraffic *bytes.Buffer, bufferedOffset int, handoffByte uint32) error {
+	backfillPos := int(handoffByte) - bufferedOffset
+	if backfillPos > bufferedTraffic.Len() {
+		return fmt.Errorf(
+			"Unexpected backfill pos, latest read from server: %d, latest reported by proxy: %d",
+			bufferedOffset+bufferedTraffic.Len(), handoffByte)
+	}
+	if backfillPos == bufferedTraffic.Len() {
+		if debugClient {
+			log.Printf("No backfill necessary")
+		}
+		bufferedTraffic.Reset()
+		return nil
+	}
+	if backfillPos < 0 {
+		return fmt.Errorf("Missing bytes to backfill: %d", backfillPos)
+	}
+	bufferedTraffic.Next(backfillPos)
+	return nil
+}
+
 // Run starts a delegated session.
 func (dc *DelegatedClient) Run() error {
-	serverConn, err := net.Dial("tcp", dc.HostPort)
-	if err != nil {
-		return fmt.Errorf("Failed to connect to %s: %s", dc.HostPort, err)
+	var err error
+	var serverReader io.ReadCloser
+	var serverWriter io.WriteCloser
+	if dc.ProxyCommand != "" {
+		proxyChild := exec.Command(os.Getenv("SHELL"), "-c", "exec "+dc.ProxyCommand)
+
+		proxyChild.Stderr = os.Stderr
+		serverReader, err = proxyChild.StdoutPipe()
+		if err != nil {
+			return fmt.Errorf("Failed to get stdout pipe of ProxyCommand process: %s", err)
+		}
+		serverWriter, err = proxyChild.StdinPipe()
+		if err != nil {
+			return fmt.Errorf("Failed to get stdin pipe of ProxyCommand process: %s", err)
+		}
+
+		if err := proxyChild.Start(); err != nil {
+			return fmt.Errorf("Failed to run ProxyCommand %s: %s", dc.ProxyCommand, err)
+		}
+
+		go func() {
+			proxyChild.Wait()
+		}()
+	} else {
+		serverConn, err := net.Dial("tcp", dc.HostPort)
+		if err != nil {
+			return fmt.Errorf("Failed to connect to %s: %s", dc.HostPort, err)
+		}
+		defer serverConn.Close()
+		serverReader = serverConn
+		serverWriter = serverConn
 	}
-	defer serverConn.Close()
 
 	guardSock, err := findGuardSocket()
 	if err != nil {
@@ -227,28 +316,82 @@ func (dc *DelegatedClient) Run() error {
 	// and the server connection is wired to the proxy transport.
 	sshOut := settableWriter{w: proxyData}
 	serverOut := settableWriter{w: &proxyTransport}
+	// To be used to buffer traffic that needs to be replayed to the client
+	// after the handoff (since the transport layer might deliver to the proxy
+	// packets that the server has sent after msgNewKeys).
+	bufferedTraffic := new(bytes.Buffer)
+	bufferedOffset := 0
 
-	go io.Copy(&sshOut, sshPipe)
-	proxyDone := make(chan error)
+	go func() {
+		_, err := io.Copy(&sshOut, sshPipe)
+		if err != nil {
+			log.Printf("Error copying outgoing SSH data: %s", err)
+		} else {
+			log.Printf("Finished copying outgoing SSH data")
+		}
+		sshOut.Close()
+	}()
+
+	proxyDone := make(chan error, 1)
+
 	go func() {
 		_, err := io.Copy(sshPipe, proxyData)
 		if debugClient {
 			log.Printf("Finished copying ssh data from proxy: %s", err)
 		}
-		proxyDone <- err
+		if err != nil {
+			sshPipe.Close()
+			proxyDone <- err
+			return
+		}
+
+		serverOut.mu.Lock()
+		defer serverOut.mu.Unlock()
+
+		handoffByte, err := getHandoffNextTransportByte(control)
+
+		if err != nil {
+			proxyDone <- err
+			sshPipe.Close()
+			return
+		}
+
+		syncBufferedTraffic(bufferedTraffic, bufferedOffset, handoffByte)
+		n, err := bufferedTraffic.WriteTo(sshPipe)
+		if err != nil {
+			proxyDone <- fmt.Errorf("Failed to backfill traffic from server to client: %s", err)
+			sshPipe.Close()
+			return
+		}
+		if debugClient {
+			log.Printf("Backfilled %d bytes from server to client", n)
+		}
+
+		proxyDone <- nil
+
+		if serverOut.werr != nil {
+			io.Copy(sshPipe, serverReader)
+			sshPipe.Close()
+		} else {
+			proxyTransport.Close()
+			serverOut.w = sshPipe
+		}
+
 	}()
 
-	toProxyTransportDone := make(chan error)
 	go func() {
-		_, err := io.Copy(&serverOut, serverConn)
+		_, err := io.Copy(&serverOut, serverReader)
 		if debugClient {
 			log.Printf("Finished copying transport data to proxy")
 		}
-		toProxyTransportDone <- err
+		serverOut.Close()
+		if err != nil && err != os.ErrClosed && err != yamux.ErrStreamClosed {
+			log.Printf("To proxy transport forwarding failed: %s", err)
+		}
 	}()
 	fromProxyTransportDone := make(chan error)
 	go func() {
-		_, err := io.Copy(serverConn, &proxyTransport)
+		_, err := io.Copy(serverWriter, &proxyTransport)
 		if debugClient {
 			log.Printf("Finished copying transport data from proxy")
 		}
@@ -256,12 +399,7 @@ func (dc *DelegatedClient) Run() error {
 	}()
 
 	doHandoffOnKex := make(chan chan error, 1)
-	// To be used to buffer traffic that needs to be replayed to the client
-	// after the handoff (since the transport layer might deliver to the proxy
-	// packets that the server has sent after msgNewKeys).
-	bufferedTraffic := new(bytes.Buffer)
-	bufferedOffset := 0
-	kexCallback := func(err error) {
+	kexCallback := func() {
 		if debugClient {
 			log.Printf("KexCallback called")
 		}
@@ -270,11 +408,6 @@ func (dc *DelegatedClient) Run() error {
 		case done = <-doHandoffOnKex:
 			break
 		default:
-			return
-		}
-
-		if err != nil {
-			done <- err
 			return
 		}
 
@@ -287,89 +420,12 @@ func (dc *DelegatedClient) Run() error {
 			return
 		}
 
-		serverOut.mu.Lock()
-		serverOut.w = sshPipe
-		select {
-		case err = <-toProxyTransportDone:
-			if err != nil && err != yamux.ErrStreamClosed {
-				done <- fmt.Errorf("To proxy transport forwarding failed: %s", err)
-			}
-			// Restart the copy routine if it ended due to an EOF on proxyTransport
-			go io.Copy(&serverOut, serverConn)
-		default:
-		}
-
 		sshOut.mu.Lock()
-		sshOut.w = serverConn
+		sshOut.w = serverWriter
 		sshOut.mu.Unlock()
 
-		if err = <-proxyDone; err != nil {
-			done <- fmt.Errorf("Proxy ssh data forwarding failed: %s", err)
-			return
-		}
-
-		msgNum, handoffPacket, err := ReadControlPacket(control)
-		handoffMsg := new(HandoffCompleteMessage)
-		switch msgNum {
-		case MsgHandoffComplete:
-			if err = ssh.Unmarshal(handoffPacket, handoffMsg); err != nil {
-				done <- fmt.Errorf("Failed to unmarshal MsgHandshakeCompleted: %s", err)
-				return
-			}
-		case MsgHandoffFailed:
-			handoffFailedMsg := new(HandoffFailedMessage)
-			ssh.Unmarshal(handoffPacket, handoffFailedMsg)
-			if debugClient {
-				log.Printf("Handoff Failed: %s", handoffFailedMsg.Msg)
-			}
-			done <- errors.New(handoffFailedMsg.Msg)
-			return
-		default:
-			done <- fmt.Errorf("Unexpected msg: %d, when expecting MsgHandshakeCompleted", handoffPacket[0])
-			return
-		}
-
-		if debugClient {
-			log.Printf("Got handoffMsg.NextTransportByte: %d", handoffMsg.NextTransportByte)
-		}
-
-		// Close the connection to the proxy
-		master.Close()
-
-		backfillPos := int(handoffMsg.NextTransportByte) - bufferedOffset
-		if backfillPos > bufferedTraffic.Len() {
-			done <- fmt.Errorf(
-				"Unexpected backfill pos, latest read from server: %d, latest reported by proxy: %d",
-				bufferedOffset+bufferedTraffic.Len(), handoffMsg.NextTransportByte)
-			serverOut.mu.Unlock()
-			return
-		}
-		if backfillPos == bufferedTraffic.Len() {
-			if debugClient {
-				log.Printf("No backfill necessary")
-			}
-			done <- nil
-			serverOut.mu.Unlock()
-			return
-		}
-		if backfillPos < 0 {
-			done <- fmt.Errorf("Missing bytes to backfill: %d", backfillPos)
-			serverOut.mu.Unlock()
-			return
-		}
-		bufferedTraffic.Next(backfillPos)
-
-		//sshServerConn is unbuffered so we empty the buffer in a separate goroutine to avoid a deadlock
 		go func() {
-			defer serverOut.mu.Unlock()
-			n, err := bufferedTraffic.WriteTo(sshPipe)
-			if err != nil {
-				done <- fmt.Errorf("Failed to backfill traffic from server to client: %s", err)
-			}
-			if debugClient {
-				log.Printf("Backfilled %d bytes from server to client", n)
-			}
-			done <- nil
+			done <- <-proxyDone
 		}()
 	}
 

@@ -1,85 +1,105 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
 	"os/user"
+	"strconv"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
 
 	guardianagent "github.com/StanfordSNR/guardian-agent"
+	flags "github.com/jessevdk/go-flags"
 )
 
 const debugClient = true
 
-func main() {
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s [user@]hostname [command]\n", os.Args[0])
-		flag.PrintDefaults()
-	}
+type SSHCommand struct {
+	UserHost string `required:"true" positional-arg-name:"[user@]hostname"`
+	Rest     []string
+}
 
-	var debug bool
-	flag.BoolVar(&debug, "debug", false, "Debug Mode")
+type options struct {
+	Debug bool `long:"debug" description:"Show debug information"`
 
-	var port int
-	flag.IntVar(&port, "p", 22, "Port to connect to on the remote host.")
+	Port uint `short:"p" long:"port" description:"Port to connect to on the intermediary host" default:"22"`
 
-	var username string
-	flag.StringVar(&username, "l", "", "Specifies the user to log in as on the remote machine")
+	Username string `short:"l" description:"Specifies the user to log in as on the remote machine"`
 
-	var logFile string
-	flag.StringVar(&logFile, "logfile", "", "log filename")
+	StdinNull bool `short:"n" description:"Redirects stdin from /dev/null"`
 
-	var stdinNull bool
-	flag.BoolVar(&stdinNull, "n", false, "Redirects stdin from /dev/null")
+	ForceTTY []bool `short:"t" description:"Forces TTY allocation"`
 
-	var forceTty bool
-	flag.BoolVar(&forceTty, "tt", false, "Forces TTY allocation")
+	LogFile string `long:"log" description:"log file"`
+
+	SSHCommand SSHCommand `positional-args:"true"`
 
 	// Flags provided for compatibility with SCP (supporting only default values)
-	var disableXForwarding bool
-	flag.BoolVar(&disableXForwarding, "x", true, "Disable X11 Forwarding (always on)")
+	DisableXForwarding bool `short:"x" hidden:"true"`
 
-	var oForwardAgent string
-	flag.StringVar(&oForwardAgent, "oForwardAgent", "no", "Should provide (standard) SSH Agent forwarding (always off)")
+	// Flags provided for compatibility with Mosh (supporting only default values)
+	ControlPath string `short:"S" hidden:"true" default:"none" choice:"none"`
 
-	var oPermitLocalCommand string
-	flag.StringVar(&oPermitLocalCommand, "oPermitLocalCommand", "no", "Allow local command execution (always off)")
+	SSHOptions []string `short:"o" description:"SSH Options (partially supported)"`
+}
 
-	var oClearAllForwardings string
-	flag.StringVar(&oClearAllForwardings, "oClearAllForwardings", "yes", "Ignore all port forwarding from configuration file (always on)")
-
-	flag.Parse()
-	if flag.NArg() < 1 {
-		flag.Usage()
-		os.Exit(255)
+func main() {
+	var opts options
+	var parser = flags.NewParser(&opts, flags.Default)
+	parser.UnknownOptionHandler = func(option string, arg flags.SplitArgument, args []string) ([]string, error) {
+		fmt.Fprintf(os.Stderr, "Unknown option: %s\n", option)
+		return args, nil
 	}
 
-	if oForwardAgent != "no" {
-		fmt.Fprintf(os.Stderr, "Unsupported option: 'ForwardAgent=%s'", oForwardAgent)
-		os.Exit(255)
+	_, err := parser.Parse()
+	if err != nil {
+		if flagsErr, ok := err.(*flags.Error); ok && flagsErr.Type == flags.ErrHelp {
+			os.Exit(0)
+		} else {
+			os.Exit(255)
+		}
 	}
 
-	if oPermitLocalCommand != "no" {
-		fmt.Fprintf(os.Stderr, "Unsupported option: 'PermitLocalCommand=%s'", oPermitLocalCommand)
-		os.Exit(255)
-	}
+	var proxyCommand string
+	for _, sshOption := range opts.SSHOptions {
+		parts := strings.SplitN(sshOption, "=", 2)
+		// These flags are supported for compatibility with SCP, but only default values are permitted.
+		if parts[0] == "ForwardAgent" || parts[0] == "PermitLocalCommand" {
+			if len(parts) < 2 || strings.ToLower(parts[1]) != "no" {
+				fmt.Fprintf(os.Stderr, "Unsupported option: %s", strings.Join(parts, "="))
+				os.Exit(255)
+			}
+			continue
+		}
 
-	if oClearAllForwardings != "yes" {
-		fmt.Fprintf(os.Stderr, "Unsupported optioni 'ClearAllForwardings=%s'", oClearAllForwardings)
+		if parts[0] == "ClearAllForwardings" {
+			if len(parts) > 1 && strings.ToLower(parts[1]) != "yes" {
+				fmt.Fprintf(os.Stderr, "Unsupported option: %s", strings.Join(parts, "="))
+				os.Exit(255)
+			}
+			continue
+		}
+
+		if parts[0] == "ProxyCommand" {
+			if len(parts) == 2 {
+				proxyCommand = parts[1]
+			}
+			continue
+		}
+
+		fmt.Fprintf(os.Stderr, "Unsupported option: %s", sshOption)
 		os.Exit(255)
 	}
 
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	if debug {
-		if logFile == "" {
+	if opts.Debug {
+		if opts.LogFile == "" {
 			log.SetOutput(os.Stderr)
 		} else {
-			f, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0644)
+			f, err := os.OpenFile(opts.LogFile, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0644)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Failed to open log file: %s", err)
 				os.Exit(255)
@@ -95,31 +115,32 @@ func main() {
 		log.Fatalf("Failed to get current user: %s", err)
 	}
 
-	userHost := strings.Split(flag.Args()[0], "@")
+	userHost := strings.Split(opts.SSHCommand.UserHost, "@")
 	host := userHost[len(userHost)-1]
-	if username == "" {
+	if opts.Username == "" {
 		if len(userHost) > 1 {
-			username = userHost[0]
+			opts.Username = userHost[0]
 		} else {
-			username = curuser.Username
+			opts.Username = curuser.Username
 		}
 	}
 
 	var cmd string
-	if flag.NArg() >= 2 {
-		cmdArgs := flag.Args()[1:]
-		if cmdArgs[0] == "--" {
-			cmdArgs = cmdArgs[1:]
-		}
-		cmd = strings.Join(cmdArgs, " ")
+	if len(opts.SSHCommand.Rest) > 0 {
+		cmd = strings.Join(opts.SSHCommand.Rest, " ")
 	}
 
+	proxyCommand = strings.Replace(proxyCommand, "%h", host, -1)
+	proxyCommand = strings.Replace(proxyCommand, "%p", strconv.Itoa(int(opts.Port)), -1)
+	proxyCommand = strings.Replace(proxyCommand, "%r", opts.Username, -1)
+
 	dc := guardianagent.DelegatedClient{
-		HostPort:  fmt.Sprintf("%s:%d", host, port),
-		Username:  username,
-		Cmd:       cmd,
-		ForceTty:  forceTty,
-		StdinNull: stdinNull,
+		HostPort:     fmt.Sprintf("%s:%d", host, opts.Port),
+		Username:     opts.Username,
+		Cmd:          cmd,
+		ProxyCommand: proxyCommand,
+		ForceTty:     len(opts.ForceTTY) == 2,
+		StdinNull:    opts.StdinNull,
 	}
 	err = dc.Run()
 	if err == nil {

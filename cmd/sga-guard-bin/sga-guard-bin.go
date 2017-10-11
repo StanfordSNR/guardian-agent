@@ -63,6 +63,7 @@ func main() {
 	_, err := parser.Parse()
 
 	if err != nil {
+		fmt.Fprintf(os.Stderr, parser.Usage)
 		if flagsErr, ok := err.(*flags.Error); ok && flagsErr.Type == flags.ErrHelp {
 			os.Exit(0)
 		} else {
