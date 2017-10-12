@@ -1,7 +1,6 @@
 package guardianagent
 
 import (
-	"bytes"
 	"crypto/md5"
 	"crypto/x509"
 	"encoding/pem"
@@ -136,24 +135,15 @@ func putHostKey(knownHostsPath string, addr string, hostKey ssh.PublicKey) error
 	}
 	defer out.Close()
 
-	_, err = out.Write(renderHostLine(addr, hostKey))
+	_, err = fmt.Fprintln(out, renderHostLine(addr, hostKey))
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func renderHostLine(addr string, key ssh.PublicKey) []byte {
-	keyByte := ssh.MarshalAuthorizedKey(key)
-	// allocate line space in advance
-	length := len(addr) + 1 + len(keyByte)
-	line := make([]byte, 0, length)
-
-	w := bytes.NewBuffer(line)
-	w.Write([]byte(addr))
-	w.WriteByte(' ')
-	w.Write(keyByte)
-	return w.Bytes()
+func renderHostLine(addr string, key ssh.PublicKey) string {
+	return knownhosts.HashHostname(addr) + " " + string(ssh.MarshalAuthorizedKey(key))
 }
 
 const (
