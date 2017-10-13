@@ -26,7 +26,7 @@ type SSHFwd struct {
 	SSHProgram     string
 	SSHArgs        []string
 	Host           string
-	Port           uint
+	Port           int
 	Username       string
 	RemoteStubName string
 

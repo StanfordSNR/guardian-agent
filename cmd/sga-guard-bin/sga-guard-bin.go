@@ -6,7 +6,6 @@ import (
 	"log"
 	"net"
 	"os"
-	"os/user"
 	"runtime"
 	"strings"
 
@@ -21,9 +20,7 @@ type SSHCommand struct {
 }
 
 type options struct {
-	Debug bool `long:"debug" description:"Show debug information"`
-
-	Port uint `short:"p" long:"port" description:"Port to connect to on the intermediary host" default:"22"`
+	guardianagent.CommonOptions
 
 	SSHProgram string `long:"ssh" description:"ssh program to run when setting up session" default:"ssh"`
 
@@ -32,8 +29,6 @@ type options struct {
 	RemoteStubName string `long:"stub" description:"Remote stub executable path" default:"sga-stub"`
 
 	PromptType string `long:"prompt" description:"Type of prompt to use." choice:"DISPLAY" choice:"TERMINAL" default:"DISPLAY"`
-
-	LogFile string `long:"log" description:"log file"`
 
 	SSHCommand SSHCommand `positional-args:"true" required:"true"`
 }
@@ -44,7 +39,7 @@ func main() {
 	var sshOptions []string
 	parser.UnknownOptionHandler = func(option string, arg flags.SplitArgument, args []string) ([]string, error) {
 		val, isSet := arg.Value()
-		sshFlagsWithValues := "bcDEeFIiLlmOoQRWw"
+		sshFlagsWithValues := "bcDEeFIiLmOoQRWw"
 
 		if isSet {
 			sshOptions = append(sshOptions, fmt.Sprintf("-%s %s", option, val))
@@ -84,20 +79,8 @@ func main() {
 		log.SetOutput(ioutil.Discard)
 	}
 
-	curuser, err := user.Current()
-	if err != nil {
-		log.Fatalf("Failed to get current user: %s", err)
-	}
-
-	userHost := strings.Split(opts.SSHCommand.UserHost, "@")
-	var username string
 	var host string
-	if len(userHost) > 1 {
-		username, host = userHost[0], userHost[1]
-	} else {
-		username = curuser.Username
-		host = userHost[0]
-	}
+	host, opts.Port, opts.Username = guardianagent.ResolveRemote(parser, &opts.CommonOptions, opts.SSHCommand.UserHost)
 
 	opts.PolicyConfig = os.ExpandEnv(opts.PolicyConfig)
 	var ag *guardianagent.Agent
@@ -121,7 +104,7 @@ func main() {
 		SSHArgs:        sshOptions,
 		Host:           host,
 		Port:           opts.Port,
-		Username:       username,
+		Username:       opts.Username,
 		RemoteStubName: opts.RemoteStubName,
 	}
 
@@ -130,7 +113,7 @@ func main() {
 		os.Exit(255)
 	}
 
-	fmt.Println("Listening for incoming Guardian Agent requests...")
+	fmt.Printf("Listening for incoming Guardian Agent requests from %s@%s:%d...\n", opts.Username, host, opts.Port)
 
 	var c net.Conn
 	for {

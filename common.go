@@ -1,7 +1,8 @@
 package guardianagent
 
-
 import (
+	"bufio"
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -10,7 +11,12 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
+	"os/user"
+	"strconv"
 	"strings"
+
+	flags "github.com/jessevdk/go-flags"
 )
 
 const debugCommon = false
@@ -169,4 +175,60 @@ func UserRuntimeDir() string {
 		return dir
 	}
 	return os.Getenv("HOME")
+}
+
+type CommonOptions struct {
+	Debug bool `long:"debug" description:"Show debug information"`
+
+	Port int `short:"p" long:"port" description:"Port to connect to on the intermediary host" default:"22"`
+
+	Username string `short:"l" description:"Specifies the user to log in as on the remote machine"`
+
+	LogFile string `long:"log" description:"log file"`
+}
+
+func ResolveRemote(parser *flags.Parser, opts *CommonOptions, userAndHost string) (host string, port int, username string) {
+	sshCommandLine := []string{"-G", userAndHost}
+	if !parser.FindOptionByLongName("port").IsSetDefault() {
+		sshCommandLine = append(sshCommandLine, fmt.Sprintf("-p %d", opts.Port))
+	}
+	if parser.FindOptionByShortName('l').IsSet() {
+		sshCommandLine = append(sshCommandLine, "-l", opts.Username)
+	}
+
+	sshChild := exec.Command("ssh", sshCommandLine...)
+	output, err := sshChild.Output()
+	if err != nil {
+		log.Printf("Failed to resolve remote using 'ssh %s': %s. Using fallback resolution.", sshCommandLine, err)
+		return fallbackResolveRemote(opts, userAndHost)
+	}
+	lineScanner := bufio.NewScanner(bytes.NewReader(output))
+	lineScanner.Split(bufio.ScanLines)
+	for lineScanner.Scan() {
+		line := lineScanner.Text()
+		if strings.HasPrefix(strings.ToLower(line), "hostname ") {
+			host = line[len("hostname "):]
+		} else if strings.HasPrefix(strings.ToLower(line), "user ") {
+			username = line[len("user "):]
+		} else if strings.HasPrefix(strings.ToLower(line), "port ") {
+			port, _ = strconv.Atoi(line[len("port "):])
+		}
+	}
+	return host, port, username
+}
+
+func fallbackResolveRemote(opts *CommonOptions, userAndHost string) (host string, port int, username string) {
+	userHost := strings.Split(userAndHost, "@")
+	host = userHost[len(userHost)-1]
+	if opts.Username != "" {
+		username = opts.Username
+	} else if len(userHost) > 1 {
+		username = userHost[0]
+	} else {
+		curuser, err := user.Current()
+		if err == nil {
+			username = curuser.Username
+		}
+	}
+	return host, opts.Port, username
 }
