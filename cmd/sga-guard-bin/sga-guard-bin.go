@@ -39,7 +39,7 @@ func main() {
 	var sshOptions []string
 	parser.UnknownOptionHandler = func(option string, arg flags.SplitArgument, args []string) ([]string, error) {
 		val, isSet := arg.Value()
-		sshFlagsWithValues := "bcDEeFIiLmOoQRWw"
+		sshFlagsWithValues := "bcDEeFIiLmOopQRWw"
 
 		if isSet {
 			sshOptions = append(sshOptions, fmt.Sprintf("-%s %s", option, val))
@@ -63,6 +63,12 @@ func main() {
 		}
 	}
 
+	readableName := opts.SSHCommand.UserHost
+	if parser.FindOptionByShortName('l').IsSet() {
+		readableName = opts.Username + "@" + readableName
+		sshOptions = append(sshOptions, "-l", opts.Username)
+	}
+
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	if opts.Debug {
 		if opts.LogFile == "" {
@@ -78,9 +84,6 @@ func main() {
 	} else {
 		log.SetOutput(ioutil.Discard)
 	}
-
-	var host string
-	host, opts.Port, opts.Username = guardianagent.ResolveRemote(parser, &opts.CommonOptions, opts.SSHCommand.UserHost)
 
 	opts.PolicyConfig = os.ExpandEnv(opts.PolicyConfig)
 	var ag *guardianagent.Agent
@@ -100,12 +103,11 @@ func main() {
 		os.Exit(255)
 	}
 	sshFwd := guardianagent.SSHFwd{
-		SSHProgram:     opts.SSHProgram,
-		SSHArgs:        sshOptions,
-		Host:           host,
-		Port:           opts.Port,
-		Username:       opts.Username,
-		RemoteStubName: opts.RemoteStubName,
+		SSHProgram:         opts.SSHProgram,
+		SSHArgs:            sshOptions,
+		Host:               opts.SSHCommand.UserHost,
+		RemoteReadableName: readableName,
+		RemoteStubName:     opts.RemoteStubName,
 	}
 
 	if err = sshFwd.SetupForwarding(); err != nil {
@@ -113,7 +115,7 @@ func main() {
 		os.Exit(255)
 	}
 
-	fmt.Printf("Listening for incoming Guardian Agent requests from %s@%s:%d...\n", opts.Username, host, opts.Port)
+	fmt.Printf("Listening for incoming Guardian Agent requests from %s...\n", readableName)
 
 	var c net.Conn
 	for {

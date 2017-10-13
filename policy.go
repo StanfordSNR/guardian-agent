@@ -12,25 +12,20 @@ type Policy struct {
 
 func (policy *Policy) RequestApproval(scope Scope, cmd string) error {
 	if policy.Store.IsAllowed(scope, cmd) {
-		policy.UI.Inform(fmt.Sprintf("Request by %s@%s:%d to run '%s' on %s@%s auto approved by policy",
-			scope.ClientUsername, scope.ClientHostname,
-			scope.ClientPort, cmd, scope.ServiceUsername,
+		policy.UI.Inform(fmt.Sprintf("Request by %s to run '%s' on %s@%s AUTO-APPROVED by policy",
+			scope.Client, cmd, scope.ServiceUsername,
 			scope.ServiceHostname))
 		return nil
 	}
-	question := fmt.Sprintf("Allow %s@%s:%d to run '%s' on %s@%s?",
-		scope.ClientUsername, scope.ClientHostname,
-		scope.ClientPort, cmd, scope.ServiceUsername,
-		scope.ServiceHostname)
+	question := fmt.Sprintf("Allow %s to run '%s' on %s@%s?",
+		scope.Client, cmd, scope.ServiceUsername, scope.ServiceHostname)
 
 	prompt := Prompt{
 		Question: question,
 		Choices: []string{
 			"Disallow", "Allow once", "Allow forever",
-			fmt.Sprintf("Allow %s@%s:%d to run any command on %s@%s forever",
-				scope.ClientUsername, scope.ClientHostname,
-				scope.ClientPort, scope.ServiceUsername,
-				scope.ServiceHostname),
+			fmt.Sprintf("Allow %s to run any command on %s@%s forever",
+				scope.Client, scope.ServiceUsername, scope.ServiceHostname),
 		},
 	}
 	resp, err := policy.UI.Ask(prompt)
@@ -39,14 +34,22 @@ func (policy *Policy) RequestApproval(scope Scope, cmd string) error {
 	}
 
 	switch resp {
-	case 1:
-		err = errors.New("User rejected client request")
 	case 2:
+		policy.UI.Inform(fmt.Sprintf("Request by %s to run '%s' on %s@%s APPROVED by user",
+			scope.Client, cmd, scope.ServiceUsername, scope.ServiceHostname))
 		err = nil
 	case 3:
+		policy.UI.Inform(fmt.Sprintf("Request by %s to run '%s' on %s@%s PERMANENTLY APPROVED by user",
+			scope.Client, cmd, scope.ServiceUsername, scope.ServiceHostname))
 		err = policy.Store.AllowCommand(scope, cmd)
 	case 4:
+		policy.UI.Inform(fmt.Sprintf("Request by %s to run ANY COMMAND on %s@%s PERMANENTLY APPROVED by user",
+			scope.Client, scope.ServiceUsername, scope.ServiceHostname))
 		err = policy.Store.AllowAll(scope)
+	default:
+		policy.UI.Inform(fmt.Sprintf("Request by %s to run '%s' on %s@%s DENIED by user",
+			scope.Client, cmd, scope.ServiceUsername, scope.ServiceHostname))
+		err = errors.New("User rejected client request")
 	}
 
 	return err
@@ -54,15 +57,12 @@ func (policy *Policy) RequestApproval(scope Scope, cmd string) error {
 
 func (policy *Policy) RequestApprovalForAllCommands(scope Scope) error {
 	if policy.Store.AreAllAllowed(scope) {
-		policy.UI.Inform(fmt.Sprintf("Request by %s@%s:%d to run any command on %s@%s auto approved by policy",
-			scope.ClientUsername, scope.ClientHostname,
-			scope.ClientPort, scope.ServiceUsername, scope.ServiceHostname))
+		policy.UI.Inform(fmt.Sprintf("Request by %s to run ANY COMMAND on %s@%s AUTO-APPROVED by policy",
+			scope.Client, scope.ServiceUsername, scope.ServiceHostname))
 		return nil
 	}
-	question := fmt.Sprintf("Can't enforce permission for a single command. Allow %s@%s:%d to run any command on %s@%s?",
-		scope.ClientUsername, scope.ClientHostname,
-		scope.ClientPort, scope.ServiceUsername,
-		scope.ServiceHostname)
+	question := fmt.Sprintf("Can't enforce permission for a single command. Allow %s to run ANY COMMAND on %s@%s?",
+		scope.Client, scope.ServiceUsername, scope.ServiceHostname)
 
 	prompt := Prompt{
 		Question: question,
@@ -71,12 +71,18 @@ func (policy *Policy) RequestApprovalForAllCommands(scope Scope) error {
 	resp, err := policy.UI.Ask(prompt)
 
 	switch resp {
-	case 1:
-		err = errors.New("Policy rejected approval escalation")
 	case 2:
+		policy.UI.Inform(fmt.Sprintf("Request by %s to run ANY COMMAND on %s@%s APPROVED by user",
+			scope.Client, scope.ServiceUsername, scope.ServiceHostname))
 		err = nil
 	case 3:
+		policy.UI.Inform(fmt.Sprintf("Request by %s to run ANY COMMAND on %s@%s PERMANENTLY APPROVED by user",
+			scope.Client, scope.ServiceUsername, scope.ServiceHostname))
 		err = policy.Store.AllowAll(scope)
+	default:
+		policy.UI.Inform(fmt.Sprintf("Request by %s to run ANY COMMAND on %s@%s DENIED by user",
+			scope.Client, scope.ServiceUsername, scope.ServiceHostname))
+		err = errors.New("User rejected approval escalation")
 	}
 
 	return err

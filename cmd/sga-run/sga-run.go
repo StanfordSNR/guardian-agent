@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
+	"os/exec"
+	"os/user"
 	"strconv"
 	"strings"
 
@@ -23,6 +27,8 @@ type SSHCommand struct {
 
 type options struct {
 	guardianagent.CommonOptions
+
+	Port int `short:"p" long:"port" description:"Port to connect to on the intermediary host" default:"22"`
 
 	StdinNull bool `short:"n" description:"Redirects stdin from /dev/null"`
 
@@ -104,7 +110,7 @@ func main() {
 	}
 
 	var host string
-	host, opts.Port, opts.Username = guardianagent.ResolveRemote(parser, &opts.CommonOptions, opts.SSHCommand.UserHost)
+	host, opts.Port, opts.Username = resolveRemote(parser, &opts, opts.SSHCommand.UserHost)
 
 	var cmd string
 	if len(opts.SSHCommand.Rest) > 0 {
@@ -137,4 +143,50 @@ func main() {
 	fmt.Fprintln(os.Stderr, err)
 	os.Exit(255)
 
+}
+
+func resolveRemote(parser *flags.Parser, opts *options, userAndHost string) (host string, port int, username string) {
+	sshCommandLine := []string{"-G", userAndHost}
+	if !parser.FindOptionByLongName("port").IsSetDefault() {
+		sshCommandLine = append(sshCommandLine, fmt.Sprintf("-p %d", opts.Port))
+	}
+	if parser.FindOptionByShortName('l').IsSet() {
+		sshCommandLine = append(sshCommandLine, "-l", opts.Username)
+	}
+
+	sshChild := exec.Command("ssh", sshCommandLine...)
+	output, err := sshChild.Output()
+	if err != nil {
+		log.Printf("Failed to resolve remote using 'ssh %s': %s. Using fallback resolution.", sshCommandLine, err)
+		return fallbackResolveRemote(opts, userAndHost)
+	}
+	lineScanner := bufio.NewScanner(bytes.NewReader(output))
+	lineScanner.Split(bufio.ScanLines)
+	for lineScanner.Scan() {
+		line := lineScanner.Text()
+		if strings.HasPrefix(strings.ToLower(line), "hostname ") {
+			host = line[len("hostname "):]
+		} else if strings.HasPrefix(strings.ToLower(line), "user ") {
+			username = line[len("user "):]
+		} else if strings.HasPrefix(strings.ToLower(line), "port ") {
+			port, _ = strconv.Atoi(line[len("port "):])
+		}
+	}
+	return host, port, username
+}
+
+func fallbackResolveRemote(opts *options, userAndHost string) (host string, port int, username string) {
+	userHost := strings.Split(userAndHost, "@")
+	host = userHost[len(userHost)-1]
+	if opts.Username != "" {
+		username = opts.Username
+	} else if len(userHost) > 1 {
+		username = userHost[0]
+	} else {
+		curuser, err := user.Current()
+		if err == nil {
+			username = curuser.Username
+		}
+	}
+	return host, opts.Port, username
 }

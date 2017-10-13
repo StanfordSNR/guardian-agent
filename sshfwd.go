@@ -23,12 +23,11 @@ import (
 const debugSSHFwd = true
 
 type SSHFwd struct {
-	SSHProgram     string
-	SSHArgs        []string
-	Host           string
-	Port           int
-	Username       string
-	RemoteStubName string
+	SSHProgram         string
+	SSHArgs            []string
+	Host               string
+	RemoteReadableName string
+	RemoteStubName     string
 
 	localSocket  string
 	remoteSocket string
@@ -36,10 +35,7 @@ type SSHFwd struct {
 }
 
 func (fwd *SSHFwd) SetupForwarding() error {
-	fwd.SSHArgs = append(fwd.SSHArgs,
-		fmt.Sprintf("-p %d", fwd.Port),
-		"-S", path.Join(UserTempDir(), strconv.Itoa(int(rand.Int31()))),
-		fmt.Sprintf("%s@%s", fwd.Username, fwd.Host))
+	fwd.SSHArgs = append(fwd.SSHArgs, "-S", path.Join(UserTempDir(), strconv.Itoa(int(rand.Int31()))), fwd.Host)
 	remoteStub := exec.Command(fwd.SSHProgram, append(fwd.SSHArgs, "-M", fwd.RemoteStubName)...)
 	remoteStdErr, err := remoteStub.StderrPipe()
 	if err != nil {
@@ -91,7 +87,8 @@ func (fwd *SSHFwd) SetupForwarding() error {
 	}()
 
 	child := exec.Command(fwd.SSHProgram,
-		append(fwd.SSHArgs, "-o ExitOnForwardFailure yes", "-T", "-O", "forward", fmt.Sprintf("-R %s:%s", string(remoteSocket), bindAddr))...)
+		append(fwd.SSHArgs, "-o ExitOnForwardFailure yes", "-T", "-O", "forward",
+			fmt.Sprintf("-R %s:%s", string(remoteSocket), bindAddr))...)
 	_, err = child.Output()
 	if err != nil {
 		var stdErr []byte
@@ -151,7 +148,7 @@ func (fwd *SSHFwd) Accept() (net.Conn, error) {
 		client.Close()
 	}()
 	go func() {
-		msg := AgentForwardingNoticeMsg{Hostname: fwd.Host, Port: uint32(fwd.Port), Username: fwd.Username}
+		msg := AgentForwardingNoticeMsg{Client: fwd.RemoteReadableName}
 		if err = WriteControlPacket(clientPipe, MsgAgentForwardingNotice, ssh.Marshal(msg)); err != nil {
 			log.Printf("Failed to send message to agent: %s", err)
 			return

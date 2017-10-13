@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"strconv"
@@ -143,7 +142,7 @@ func (AskPassUI) Ask(params Prompt) (reply int, err error) {
 }
 
 func (AskPassUI) Inform(msg string) {
-	log.Printf(msg)
+	fmt.Println(msg)
 }
 
 func (AskPassUI) Alert(msg string) {

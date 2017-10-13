@@ -1,3 +1,4 @@
 #!/bin/sh
 
+command -v autossh >/dev/null 2>&1 || { echo "autossh is required but is not installed.  Aborting." >&2; exit 1; }
 exec env AUTOSSH_PATH=sga-guard-bin autossh -M 0 -oServerAliveInterval=30 -oServerAliveCountMax=3 -- $*

@@ -264,9 +264,7 @@ func (agent *Agent) HandleConnection(conn net.Conn) error {
 			if err := ssh.Unmarshal(payload, notice); err != nil {
 				return fmt.Errorf("Failed to unmarshal AgentForwardingNoticeMsg: %s", err)
 			}
-			scope.ClientHostname = notice.Hostname
-			scope.ClientPort = notice.Port
-			scope.ClientUsername = notice.Username
+			scope.Client = notice.Client
 		case MsgExecutionRequest:
 			execReq := new(ExecutionRequestMessage)
 			if err = ssh.Unmarshal(payload, execReq); err != nil {
