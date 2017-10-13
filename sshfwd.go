@@ -113,7 +113,7 @@ func (fwd *SSHFwd) SetupForwarding() error {
 	return nil
 }
 
-func (fwd *SSHFwd) Run(cmd string) error {
+func (fwd *SSHFwd) RunRemote(cmd string) error {
 	if cmd == "" {
 		fwd.SSHArgs = append(fwd.SSHArgs, "-t")
 	} else {
@@ -124,6 +124,15 @@ func (fwd *SSHFwd) Run(cmd string) error {
 	}
 	child := exec.Command(fwd.SSHProgram, fwd.SSHArgs...)
 
+	child.Stderr = os.Stderr
+	child.Stdout = os.Stdout
+	child.Stdin = os.Stdin
+
+	return child.Run()
+}
+
+func (fwd *SSHFwd) RunLocal(cmd string) error {
+	child := exec.Command(os.Getenv("SHELL"), "-c", cmd)
 	child.Stderr = os.Stderr
 	child.Stdout = os.Stdout
 	child.Stdin = os.Stdin

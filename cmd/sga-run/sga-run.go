@@ -21,8 +21,8 @@ import (
 const debugClient = true
 
 type SSHCommand struct {
-	UserHost string `required:"true" positional-arg-name:"[user@]hostname"`
-	Rest     []string
+	UserHost string   `required:"true" positional-arg-name:"[user@]hostname"`
+	Rest     []string `positional-arg-name:"[--] [command]" optional:"true"`
 }
 
 type options struct {
@@ -38,7 +38,7 @@ type options struct {
 
 	LogFile string `long:"log" description:"log file"`
 
-	SSHCommand SSHCommand `positional-args:"true"`
+	SSHCommand SSHCommand `positional-args:"true" required:"true"`
 
 	// Flags provided for compatibility with SCP (supporting only default values)
 	DisableXForwarding bool `short:"x" hidden:"true"`

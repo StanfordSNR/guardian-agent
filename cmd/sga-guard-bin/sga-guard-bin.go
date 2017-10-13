@@ -18,7 +18,6 @@ const debugClient = true
 
 type SSHCommand struct {
 	UserHost string `required:"true" positional-arg-name:"[user@]hostname"`
-	Rest     []string
 }
 
 type options struct {
@@ -28,17 +27,15 @@ type options struct {
 
 	SSHProgram string `long:"ssh" description:"ssh program to run when setting up session" default:"ssh"`
 
-	NoCommand bool `short:"N" description:"Do not execute Commands. Useful for standalone SSH Agent Forwarding"`
-
 	PolicyConfig string `long:"policy" description:"Policy config file" default:"$HOME/.ssh/sga_policy"`
 
 	RemoteStubName string `long:"stub" description:"Remote stub executable path" default:"sga-stub"`
 
-	PromptType string `long:"prompt" description:"Type of prompt to use: DISPLAY|TERMINAL" choice:"DISPLAY" choice:"TERMINAL" choice:""`
+	PromptType string `long:"prompt" description:"Type of prompt to use." choice:"DISPLAY" choice:"TERMINAL" default:"DISPLAY"`
 
 	LogFile string `long:"log" description:"log file"`
 
-	SSHCommand SSHCommand `positional-args:"true"`
+	SSHCommand SSHCommand `positional-args:"true" required:"true"`
 }
 
 func main() {
@@ -102,21 +99,18 @@ func main() {
 		host = userHost[0]
 	}
 
-	var cmd string
-	if len(opts.SSHCommand.Rest) >= 1 {
-		cmd = strings.Join(opts.SSHCommand.Rest, " ")
-	}
-
 	opts.PolicyConfig = os.ExpandEnv(opts.PolicyConfig)
 	var ag *guardianagent.Agent
-	if opts.NoCommand && opts.PromptType != "DISPLAY" {
-		ag, err = guardianagent.NewGuardian(opts.PolicyConfig, guardianagent.Terminal)
-	} else {
+	if opts.PromptType == "DISPLAY" {
 		if (runtime.GOOS == "linux") && (os.Getenv("DISPLAY") == "") {
-			fmt.Fprintf(os.Stderr, "DISPLAY must be set for user prompts.\nEither set the DISPLAY environment variable or use -N.")
-			os.Exit(255)
+			fmt.Fprintln(os.Stderr, `DISPLAY environment variable is not set. Using terminal for user prompts.`)
+			opts.PromptType = "TERMINAL"
+		} else {
+			ag, err = guardianagent.NewGuardian(opts.PolicyConfig, guardianagent.Display)
 		}
-		ag, err = guardianagent.NewGuardian(opts.PolicyConfig, guardianagent.Display)
+	}
+	if opts.PromptType == "TERMINAL" {
+		ag, err = guardianagent.NewGuardian(opts.PolicyConfig, guardianagent.Terminal)
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s", err)
@@ -136,26 +130,14 @@ func main() {
 		os.Exit(255)
 	}
 
-	done := false
-	if !opts.NoCommand {
-		go func() {
-			sshFwd.Run(cmd)
-			done = true
-			sshFwd.Close()
-		}()
-	} else {
-		fmt.Println("Listening for incoming ssh agent requests...")
-	}
+	fmt.Println("Listening for incoming Guardian Agent requests...")
 
 	var c net.Conn
 	for {
 		c, err = sshFwd.Accept()
 		if err != nil {
-			if !done {
-				log.Printf("Error forwarding: %s", err)
-				os.Exit(255)
-			}
-			break
+			log.Printf("Error forwarding: %s", err)
+			os.Exit(255)
 		}
 		go func() {
 			if err = ag.HandleConnection(c); err != nil {

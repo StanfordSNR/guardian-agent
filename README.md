@@ -89,7 +89,7 @@ To use `sga-run` as a drop-in replacement for `ssh` on the intermediary host, ad
 alias sga-scp="scp -S sga-run"
 alias sga-rsync="RSYNC_RSH=sga-run rsync"
 alias sga-git="GIT_SSH_COMMAND=sga-run git" 
-alias sga-mosh="mosh --ssh=sga-run --experimental-remote-ip=remote"
+alias sga-mosh="mosh --ssh=sga-run"
 ```
 
 ## Advanced Usage
