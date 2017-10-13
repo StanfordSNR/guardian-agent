@@ -24,11 +24,11 @@ private key. A compromised intermediary can send rogue challenges and use the
 user's identity to authenticate to other servers or to run unauthorized
 commands.
 
-SSH Guardian Agent is an SSH client providing secure SSH agent forwarding. A
-user first uses `sga-guard` as an SSH client to connect from the local machine,
-on which she stores her private SSH keys, to an intermediary machine (e.g., on
-AWS). She can then use `sga-run` on the intermediary machine to establish SSH
-connections to other servers. The local `sga-guard` verifies the identity of the
+SSH Guardian Agent provides secure SSH agent forwarding. A user first runs
+`sga-guard` on her local machine (on which she stores her private SSH keys) to
+securely forward her SSH agent to an intermediary machine (e.g., on AWS). She
+can then use `sga-run` on the intermediary machine to establish SSH connections
+to other servers. The local `sga-guard` verifies the identity of the
 **intermediary**, the **remote server** and the **command**, either by prompting
 the user or based on a stored security policy.
 
@@ -51,8 +51,8 @@ the user or based on a stored security policy.
 Using SSH Guardian Agent requires installation both on your local machine (the
 one with your SSH private keys) and on each of the intermediary machines you
 want to securely forward SSH agent to (the machines on which you want to run an
-SSH client without having the keys on them). No installation is required on the
-server side.
+SSH client without having the keys on them). **No installation is required on the
+server side.**
 
 1. Install the following dependencies:
   * OpenSSH client
@@ -68,13 +68,13 @@ server side.
 
 Make sure SSH guardian agent is installed on both your local and intermediary machine.
 
-Start an SSH session to the intermediary machine with secure agent forwarding enabled:
+Start guarded SSH agent forwarding to the intermediary machine:
 
 ```
 [local]$ sga-guard <intermediary>
 ```  
 
-To use the the forwarded agent on the intermediary:
+Then, to use the forwarded agent on the intermediary:
 ```
 [intermediary]$ sga-run <server> [command]
 ```
@@ -94,27 +94,13 @@ alias sga-mosh="mosh --ssh=sga-run"
 
 ## Advanced Usage
 
-### Forwarding only
-To enable secure agent forwarding to a intermediary machine without starting an interactive session on the intermediary host:
-
-```
-[local]$ sga-guard -N <remote>
-```
-
-The user can then use ``sga-run`` on the intermediary machine in any other
-session on the intermediary host (e.g., by connecting to the intermediary using
-OpenSSH or Mosh).
-
 ### Prompt types
 
 Guardian agent supports two types of interactive prompts: graphical and
-terminal-based. The graphical prompt requires the `DISPLAY` environment to be
-set to the appropriate X11 server.  
-If running in a terminal-only session, a textual prompt may be used instead.
-However, the same terminal cannot be used both for textual prompts and for
-executing remote commands (or interactive sessions). Therefore, terminal-based
-prompt may only be used when [forwarding only](#forwarding-only) (i.e., the `-N`
-flag is specified).
+terminal-based. The graphical prompt requires the `DISPLAY` environment variable
+to be set to the appropriate X11 server.  
+If running in a terminal-only session (in which the `DISPLAY` environment
+variable is not set), a textual prompt will be used instead.
 
 ### Customizing the SSH command
 
