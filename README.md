@@ -19,10 +19,18 @@ Traditional ssh-agent forwarding
 [can](https://heipei.github.io/2015/02/26/SSH-Agent-Forwarding-considered-harmful/)
 [be](https://news.ycombinator.com/item?id=9425805)
 [dangerous](https://lyte.id.au/2012/03/19/ssh-agent-forwarding-is-a-bug/): the
-local ssh-agent signs unauthenticated forwarded challenges using the user's
-private key. A compromised intermediary can send rogue challenges and use the
-user's identity to authenticate to other servers or to run unauthorized
-commands.
+local ssh-agent hast to sign opaque challenges using the user's private key,
+without knowing (a) what intermediary host is asking for the signature, (b) what
+remote server that intermediary host wants to authenticate to, or (c) what
+command the intermediary host wants to execute on the remote server. 
+
+A compromised intermediary can send rogue challenges and use the user's identity
+to authenticate to other servers or to run unauthorized commands. So you might
+enable ssh-agent forwarding and be asked yes or no on signing "something," and
+you think it's allowing an EC2 machine to run "git push" to GitHub. But actually
+it's allowing a different EC2 machine (that you also are logged in to) to
+connect to some other sensitive server that you have permissions on and add an
+evil key to your authorized_keys file.)
 
 SSH Guardian Agent provides secure SSH agent forwarding. A user first runs
 `sga-guard` on her local machine (on which she stores her private SSH keys) to
