@@ -54,8 +54,8 @@ the user or based on a stored security policy.
 
 
 ## Installation
-Using SSH Guardian Agent requires installation both on your local machine (the
-one with your SSH private keys) and on each of the intermediary machines you
+Using SSH Guardian Agent requires installation **both on your local machine** (the
+one with your SSH private keys) and on each of the **intermediary machines** you
 want to securely forward SSH agent to (the machines on which you want to run an
 SSH client without having the keys on them). **No installation is required on the
 server side.**
@@ -68,7 +68,7 @@ server side.**
    release](https://github.com/StanfordSNR/guardian-agent/releases/latest) for
    your platform. Alternatively, you may opt to [build from source](#building).
 3. Extract the binaries (`sga-guard`, `sga-guard-bin`, `sga-run`, and
-   `sga-stub`) from the tarball to a directory in the user's PATH.
+   `sga-stub`) from the tarball to a **directory in the user's PATH**.
 
 ## Basic Usage
 
