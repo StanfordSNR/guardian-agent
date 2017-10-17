@@ -26,7 +26,7 @@ type options struct {
 
 	PolicyConfig string `long:"policy" description:"Policy config file" default:"$HOME/.ssh/sga_policy"`
 
-	RemoteStubName string `long:"stub" description:"Remote stub executable path" default:"sga-stub"`
+	RemoteStubName string `long:"stub" description:"Remote stub executable path" default:"sh -l -c sga-stub"`
 
 	PromptType string `long:"prompt" description:"Type of prompt to use." choice:"DISPLAY" choice:"TERMINAL" default:"DISPLAY"`
 

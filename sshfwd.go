@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"syscall"
 
 	"golang.org/x/crypto/ssh"
 
@@ -64,11 +65,22 @@ func (fwd *SSHFwd) SetupForwarding() error {
 	stubReader := bufio.NewReader(remoteStdOut)
 	remoteSocket, _, err := stubReader.ReadLine()
 	if err != nil {
+		// Some error messsage hacking to get the most informative message to the user.
 		allErr, _ := ioutil.ReadAll(remoteStdErr)
 		if err == io.EOF {
-			return fmt.Errorf("%s", allErr)
+			err = fmt.Errorf("Failed to run remote stub: %s", allErr)
+		} else {
+			err = fmt.Errorf("failed to run remote stub: %s\n%s\nMake sure that guardian agent is properly installed on the remote host", err, allErr)
 		}
-		return fmt.Errorf("%s\n%s", err, allErr)
+		stubErr := remoteStub.Wait()
+		if exiterr, ok := stubErr.(*exec.ExitError); ok {
+			// If ssh failed with 255, then there is a problem with the connections.
+			// Otherwise there is usually a problem with the installation of the tool on the remote side.
+			if status, ok := exiterr.Sys().(syscall.WaitStatus); ok && status.ExitStatus() == 255 {
+				return err
+			}
+		}
+		return fmt.Errorf("%s\nMake sure that guardian agent is properly installed on the remote host", err)
 	}
 
 	listener, bindAddr, err := CreateSocket("")
