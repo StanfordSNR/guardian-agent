@@ -1,13 +1,13 @@
 package guardianagent
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/howeyc/gopass"
 	i "github.com/sternhenri/interact"
@@ -21,46 +21,14 @@ type UI interface {
 	AskPassword(msg string) ([]byte, error)
 }
 
-type TerminalUI struct{}
-type FancyTerminalUI struct{}
+type FancyTerminalUI struct {
+	mu sync.Mutex
+}
 type AskPassUI struct{}
 
 type Prompt struct {
 	Question string
 	Choices  []string
-}
-
-func (TerminalUI) Ask(params Prompt) (reply int, err error) {
-	reply = -1
-	var convErr error
-
-	for convErr != nil || reply <= 0 || reply > len(params.Choices) {
-		fmt.Print(formatPrompt(params))
-		reader := bufio.NewReader(os.Stdin)
-		sReply, _ := reader.ReadString('\n')
-		reply, convErr = strconv.Atoi(strings.TrimSpace(sReply))
-	}
-
-	return
-}
-
-func (tui TerminalUI) Confirm(msg string) bool {
-	prompt := Prompt{Question: msg, Choices: []string{"Yes", "No"}}
-	ans, err := tui.Ask(prompt)
-	return err == nil && ans == 1
-}
-
-func (TerminalUI) Inform(msg string) {
-	fmt.Println(msg)
-}
-
-func (TerminalUI) Alert(msg string) {
-	fmt.Fprintln(os.Stderr, msg)
-}
-
-func (TerminalUI) AskPassword(msg string) ([]byte, error) {
-	fmt.Println(msg)
-	return gopass.GetPasswd()
 }
 
 func formatPrompt(params Prompt) (formattedPrompt string) {
@@ -82,7 +50,10 @@ func mapToChoice(vs []string) []i.Choice {
 	return vsm
 }
 
-func (FancyTerminalUI) Ask(params Prompt) (reply int, err error) {
+func (tui *FancyTerminalUI) Ask(params Prompt) (reply int, err error) {
+	tui.mu.Lock()
+	defer tui.mu.Unlock()
+
 	var resp int64
 
 	i.Run(&i.Interact{
@@ -105,20 +76,29 @@ func (FancyTerminalUI) Ask(params Prompt) (reply int, err error) {
 	return
 }
 
-func (FancyTerminalUI) Inform(msg string) {
+func (tui *FancyTerminalUI) Inform(msg string) {
+	tui.mu.Lock()
+	defer tui.mu.Unlock()
+
 	fmt.Println(msg)
 }
 
-func (FancyTerminalUI) Alert(msg string) {
+func (tui *FancyTerminalUI) Alert(msg string) {
+	tui.mu.Lock()
+	defer tui.mu.Unlock()
+
 	fmt.Fprintln(os.Stderr, msg)
 }
 
-func (FancyTerminalUI) AskPassword(msg string) ([]byte, error) {
+func (tui *FancyTerminalUI) AskPassword(msg string) ([]byte, error) {
+	tui.mu.Lock()
+	defer tui.mu.Unlock()
+
 	fmt.Println(msg)
 	return gopass.GetPasswd()
 }
 
-func (tui FancyTerminalUI) Confirm(msg string) bool {
+func (tui *FancyTerminalUI) Confirm(msg string) bool {
 	prompt := Prompt{Question: msg, Choices: []string{"Yes", "No"}}
 	ans, err := tui.Ask(prompt)
 	return err == nil && ans == 1

@@ -68,7 +68,7 @@ func main() {
 		// These flags are supported for compatibility with SCP, but only default values are permitted.
 		if parts[0] == "ForwardAgent" || parts[0] == "PermitLocalCommand" {
 			if len(parts) < 2 || strings.ToLower(parts[1]) != "no" {
-				fmt.Fprintf(os.Stderr, "Unsupported option: %s", strings.Join(parts, "="))
+				fmt.Fprintf(os.Stderr, "%s: unsupported option: %s", os.Args[0], strings.Join(parts, "="))
 				os.Exit(255)
 			}
 			continue
@@ -76,7 +76,7 @@ func main() {
 
 		if parts[0] == "ClearAllForwardings" {
 			if len(parts) > 1 && strings.ToLower(parts[1]) != "yes" {
-				fmt.Fprintf(os.Stderr, "Unsupported option: %s", strings.Join(parts, "="))
+				fmt.Fprintf(os.Stderr, "%s: unsupported option: %s", os.Args[0], strings.Join(parts, "="))
 				os.Exit(255)
 			}
 			continue
@@ -89,7 +89,7 @@ func main() {
 			continue
 		}
 
-		fmt.Fprintf(os.Stderr, "Unsupported option: %s", sshOption)
+		fmt.Fprintf(os.Stderr, "%s: unsupported option: %s", os.Args[0], sshOption)
 		os.Exit(255)
 	}
 
@@ -100,7 +100,7 @@ func main() {
 		} else {
 			f, err := os.OpenFile(opts.LogFile, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0644)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Failed to open log file: %s", err)
+				fmt.Fprintf(os.Stderr, "%s: failed to open log file: %s", os.Args[0], err)
 				os.Exit(255)
 			}
 			log.SetOutput(f)
@@ -133,7 +133,7 @@ func main() {
 	if err == nil {
 		return
 	}
-	log.Printf(err.Error())
+	log.Printf("%s: Failed to run %s on %s: %s", os.Args[0], cmd, host, err.Error())
 	if ee, ok := err.(*ssh.ExitError); ok {
 		if ee.Msg() != "" {
 			fmt.Fprintln(os.Stderr, ee.Msg())
@@ -157,7 +157,7 @@ func resolveRemote(parser *flags.Parser, opts *options, userAndHost string) (hos
 	sshChild := exec.Command("ssh", sshCommandLine...)
 	output, err := sshChild.Output()
 	if err != nil {
-		log.Printf("Failed to resolve remote using 'ssh %s': %s. Using fallback resolution.", sshCommandLine, err)
+		log.Printf("%s: failed to resolve remote using 'ssh %s': %s. Using fallback resolution.", os.Args[0], sshCommandLine, err)
 		return fallbackResolveRemote(opts, userAndHost)
 	}
 	lineScanner := bufio.NewScanner(bytes.NewReader(output))

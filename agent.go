@@ -47,10 +47,10 @@ func NewGuardian(policyConfigPath string, inType InputType) (*Agent, error) {
 		if !terminal.IsTerminal(int(os.Stdin.Fd())) {
 			return nil, fmt.Errorf("standard input is not a terminal")
 		}
-		ui = FancyTerminalUI{}
+		ui = &FancyTerminalUI{}
 		break
 	case Display:
-		ui = AskPassUI{}
+		ui = &AskPassUI{}
 	}
 
 	// get policy store
@@ -100,7 +100,7 @@ func (agent *Agent) getAuth(homeDir string) ssh.AuthMethod {
 	if err == nil {
 		agentClient := sshAgent.NewClient(realAgent)
 		agentKeys, err := agentClient.List()
-		if err != nil && len(agentKeys) > 0 {
+		if err == nil && len(agentKeys) > 0 {
 			return ssh.PublicKeysCallback(agentClient.Signers)
 		}
 	}

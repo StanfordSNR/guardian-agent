@@ -74,13 +74,26 @@ server side.**
 
 Make sure SSH guardian agent is installed on both your local and intermediary machine.
 
+### On your local machine
 Start guarded SSH agent forwarding to the intermediary machine:
 
 ```
 [local]$ sga-guard <intermediary>
 ```  
 
-Then, to use the forwarded agent on the intermediary:
+You should then expect to see the following message:
+```
+[local]$ sga-guard <intermediary>
+Listening for incoming Guardian Agent requests from aws-ubu...
+```
+
+Guarded agent forwarding is now enabled on the intermediary.
+
+### On the intermediary
+Connect to the intermediary (e.g., using standard ssh or mosh). 
+You can then use `sga-run` as a drop-in replacement to an ssh client (albeit supporting only limited command-line options).
+
+Then run the following from any terminal session on the intermediary:
 ```
 [intermediary]$ sga-run <server> [command]
 ```
