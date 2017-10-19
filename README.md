@@ -35,16 +35,19 @@ evil key to your authorized_keys file.)
 SSH Guardian Agent provides secure SSH agent forwarding. A user first runs
 `sga-guard` on her local machine (on which she stores her private SSH keys) to
 securely forward her SSH agent to an intermediary machine (e.g., on AWS). She
-can then use `sga-run` on the intermediary machine to establish SSH connections
-to other servers. The local `sga-guard` verifies the identity of the
-**intermediary**, the **remote server** and the **command**, either by prompting
-the user or based on a stored security policy.
+can then use `sga-ssh` on the intermediary machine as a drop-in replacement to
+`ssh`. The local `sga-guard` verifies the identity of the **intermediary**, the
+**remote server** and the **command**[<sup>*</sup>](#command-verification),
+either by prompting the user or based on a stored security policy. After all the
+details are verified, the connection is handed off to the intermediary (so the
+bulk of the data is **not** proxied through the local host).
 
 ![Example](animation.gif)
 
 * [Installation](#installation)
 * [Basic Usage](#basic-usage)
 * [Advanced Usage](#advanced-usage)
+  * [Command verification](#command-verification)
   * [Prompt types](#prompt-types)
   * [Customizing the SSH command](#customizing-the-ssh-command)
   * [Stub location](#stub-location)
@@ -67,7 +70,7 @@ server side.**
 2. Obtain the [latest
    release](https://github.com/StanfordSNR/guardian-agent/releases/latest) for
    your platform. Alternatively, you may opt to [build from source](#building).
-3. Extract the binaries (`sga-guard`, `sga-guard-bin`, `sga-run`, and
+3. Extract the executables (`sga-guard`, `sga-guard-bin`, `sga-ssh`, and
    `sga-stub`) from the tarball to a **directory in the user's PATH**.
 
 ## Basic Usage
@@ -91,27 +94,28 @@ Guarded agent forwarding is now enabled on the intermediary.
 
 ### On the intermediary
 Connect to the intermediary (e.g., using standard ssh or mosh). 
-You can then use `sga-run` as a drop-in replacement to an ssh client (albeit supporting only limited command-line options).
+You can then use `sga-ssh` as a drop-in replacement to an ssh client:
 
-Then run the following from any terminal session on the intermediary:
 ```
-[intermediary]$ sga-run <server> [command]
+[intermediary]$ sga-ssh <server> [command]
 ```
 
 This should trigger a local graphical consent prompt explicitly identifying
 `intermediary`, `server` and `command`.
 
-### Common use cases
-To use `sga-run` as a drop-in replacement for `ssh` on the intermediary host, add these lines to your `~/.bashrc` file (on the intermediary):
-
-```
-alias sga-scp="scp -S sga-run"
-alias sga-rsync="RSYNC_RSH=sga-run rsync"
-alias sga-git="GIT_SSH_COMMAND=sga-run git" 
-alias sga-mosh="mosh --ssh=sga-run"
-```
+To enable several common tools (scp, git, rsync, mosh) to use `sga-ssh` instead of the default
+`ssh` program, source [`sga-env.sh`](scripts/sga-env.sh) script in your shell (or in your `~/.bashrc`/`~.zshrc`/... file).
 
 ## Advanced Usage
+
+### Command verification
+
+Command verification requires the server to support the `no-more-sessions`
+extension. This is extension is present on most openssh servers, but
+unfortunately not implemented on other SSH servers (including github). When
+executing a command on a server that does not support this extension, only the
+idenitity of the intermediary and the identity of the server can be verified
+(which is still much better than standard ssh-agent forwarding).
 
 ### Prompt types
 
@@ -138,13 +142,13 @@ from the local machine:
 [local]$ sga-guard --stub=<PATH-TO-STUB> <intermediary>
 ```
 ## Building from Source
-1. [Install go](https://golang.org/doc/install)
+1. [Install go 1.8+](https://golang.org/doc/install)
 2. Get and build the sources:
 ```
 go get github.com/StanfordSNR/guardian-agent/...
 ```
-3. Copy the built binaries (`sga-guard-bin`, `sga-run`, and `sga-stub`) from `$GOPATH/bin` to a directory in the user's PATH.
-4. Copy the script `$GOPATH/StanfordSNR/guardian-agent/scripts/sga-guard` to a directory in the user's PATH.
+3. Copy the built binaries (`sga-guard-bin`, `sga-ssh`, and `sga-stub`) from `$GOPATH/bin` to a directory in the user's PATH.
+4. Copy the scripts `$GOPATH/StanfordSNR/guardian-agent/scripts/sga-guard` and `$GOPATH/StanfordSNR/guardian-agent/scripts/sga-env.sh` to a directory in the user's PATH.
 
 ## Troubleshooting
 

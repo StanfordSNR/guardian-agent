@@ -590,7 +590,7 @@ func (c *client) runDelegated() error {
 		return fmt.Errorf("failed to run command: %s", err)
 	}
 
-	ok, _, err := c.sshClient.SendRequest(ssh.NoMoreSessionRequestName, false, nil)
+	ok, _, err := c.sshClient.SendRequest(ssh.NoMoreSessionRequestName, true, nil)
 	if err != nil {
 		return fmt.Errorf("failed to send %s: %s", ssh.NoMoreSessionRequestName, err)
 	}
