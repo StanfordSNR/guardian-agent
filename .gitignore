@@ -2,8 +2,8 @@
 *.gitmodules
 /cmd/sga-guard/sga-guard
 /cmd/sga-guard/sga-guard.exe
-/cmd/sga-run/sga-run
-/cmd/sga-run/sga-run.exe
+/cmd/sga-ssh/sga-ssh
+/cmd/sga-ssh/sga-ssh.exe
 /cmd/sga-stub/sga-stub
 /cmd/sga-stub/sga-stub.exe
 *.go~

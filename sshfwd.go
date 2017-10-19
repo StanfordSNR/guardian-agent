@@ -128,9 +128,6 @@ func (fwd *SSHFwd) RunRemote(cmd string) error {
 	} else {
 		fwd.SSHArgs = append(fwd.SSHArgs, cmd)
 	}
-	for _, s := range fwd.SSHArgs {
-		log.Printf(s)
-	}
 	child := exec.Command(fwd.SSHProgram, fwd.SSHArgs...)
 
 	child.Stderr = os.Stderr

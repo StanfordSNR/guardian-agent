@@ -121,7 +121,7 @@ func main() {
 	proxyCommand = strings.Replace(proxyCommand, "%p", strconv.Itoa(opts.Port), -1)
 	proxyCommand = strings.Replace(proxyCommand, "%r", opts.Username, -1)
 
-	dc := guardianagent.DelegatedClient{
+	sshCmd := guardianagent.SSHCommand{
 		HostPort:     fmt.Sprintf("%s:%d", host, opts.Port),
 		Username:     opts.Username,
 		Cmd:          cmd,
@@ -129,7 +129,7 @@ func main() {
 		ForceTty:     len(opts.ForceTTY) == 2,
 		StdinNull:    opts.StdinNull,
 	}
-	err = dc.Run()
+	err = guardianagent.RunSSHCommand(sshCmd)
 	if err == nil {
 		return
 	}

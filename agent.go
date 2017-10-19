@@ -1,24 +1,15 @@
 package guardianagent
 
 import (
-	"crypto/md5"
-	"crypto/x509"
-	"encoding/pem"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net"
 	"os"
 	"os/user"
-	"strings"
-
-	"path"
 
 	"github.com/hashicorp/yamux"
 	"golang.org/x/crypto/ssh"
-	sshAgent "golang.org/x/crypto/ssh/agent"
-	"golang.org/x/crypto/ssh/knownhosts"
 	"golang.org/x/crypto/ssh/terminal"
 )
 
@@ -30,17 +21,11 @@ const (
 )
 
 type Agent struct {
-	realAgentPath string
-	policy        Policy
-	store         *Store
+	policy Policy
+	store  *Store
 }
 
 func NewGuardian(policyConfigPath string, inType InputType) (*Agent, error) {
-	realAgentPath := os.Getenv("SSH_AUTH_SOCK")
-	if realAgentPath == "" {
-		return nil, fmt.Errorf("SSH_AUTH_SOCK not set")
-	}
-
 	var ui UI
 	switch inType {
 	case Terminal:
@@ -59,150 +44,9 @@ func NewGuardian(policyConfigPath string, inType InputType) (*Agent, error) {
 		return nil, fmt.Errorf("Failed to load policy store: %s", err)
 	}
 	return &Agent{
-			realAgentPath: realAgentPath,
-			store:         store,
-			policy:        Policy{Store: store, UI: ui}},
+			store:  store,
+			policy: Policy{Store: store, UI: ui}},
 		nil
-}
-
-func (agent *Agent) getKeyFileAuth(keyPath string) (ssh.Signer, error) {
-	buf, err := ioutil.ReadFile(keyPath)
-	if err != nil {
-		return nil, err
-	}
-	p, rest := pem.Decode(buf)
-	if len(rest) > 0 {
-		return nil, fmt.Errorf("Failed to decode key")
-	}
-	pBlock := pem.Block{
-		Bytes:   buf,
-		Type:    p.Type,
-		Headers: p.Headers,
-	}
-	if x509.IsEncryptedPEMBlock(&pBlock) {
-		password, err := agent.policy.UI.AskPassword(fmt.Sprintf("Enter passphrase for key '%s':", keyPath))
-		rawkey, err := ssh.ParsePrivateKeyWithPassphrase(buf, password)
-		if err != nil {
-			return nil, err
-		}
-		return rawkey.(ssh.Signer), nil
-	}
-	// Non-encrypted key
-	key, err := ssh.ParsePrivateKey(buf)
-	if err != nil {
-		return nil, err
-	}
-	return key, nil
-}
-
-func (agent *Agent) getAuth(homeDir string) ssh.AuthMethod {
-	realAgent, err := net.Dial("unix", agent.realAgentPath)
-	if err == nil {
-		agentClient := sshAgent.NewClient(realAgent)
-		agentKeys, err := agentClient.List()
-		if err == nil && len(agentKeys) > 0 {
-			return ssh.PublicKeysCallback(agentClient.Signers)
-		}
-	}
-
-	var signers []ssh.Signer
-	for _, keyFile := range []string{"identity", "id_dsa", "id_rsa", "id_ecdsa", "id_ed25519"} {
-		keyPath := path.Join(homeDir, ".ssh", keyFile)
-		if _, err := os.Stat(keyPath); os.IsNotExist(err) {
-			continue
-		}
-		signer, err := agent.getKeyFileAuth(keyPath)
-		if err != nil {
-			log.Printf("Error parsing private key: %s: %s", keyPath, err)
-			continue
-		}
-		signers = append(signers, signer)
-	}
-	return ssh.PublicKeys(signers...)
-}
-
-// Adapted from https://github.com/coreos/fleet/blob/master/ssh/known_hosts.go
-func putHostKey(knownHostsPath string, addr string, hostKey ssh.PublicKey) error {
-	// Make necessary directories if needed
-	err := os.MkdirAll(path.Dir(knownHostsPath), 0700)
-	if err != nil {
-		return err
-	}
-
-	out, err := os.OpenFile(knownHostsPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	_, err = fmt.Fprintln(out, renderHostLine(addr, hostKey))
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func renderHostLine(addr string, key ssh.PublicKey) string {
-	return knownhosts.HashHostname(addr) + " " + string(ssh.MarshalAuthorizedKey(key))
-}
-
-const (
-	warningRemoteHostChanged = `@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @
-@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!
-Someone could be eavesdropping on you right now (man-in-the-middle attack)!
-It is also possible that a host key has just been changed.
-The fingerprint for the %v key sent by the remote host is
-%v.
-Please contact your system administrator.
-Add correct host key in %v to get rid of this message.
-Host key verification failed.
-	`
-	promptToTrustHost = `The authenticity of host '%v' can't be established.
-%v key fingerprint is %v.
-Are you sure you want to continue connecting (yes/no)? `
-)
-
-// md5String returns a formatted string representing the given md5Sum in hex
-func md5String(md5Sum [16]byte) string {
-	md5Str := fmt.Sprintf("% x", md5Sum)
-	md5Str = strings.Replace(md5Str, " ", ":", -1)
-	return md5Str
-}
-
-func (agent *Agent) hostKeyCallback(hostname string, remote net.Addr, key ssh.PublicKey) error {
-	curuser, err := user.Current()
-	if err != nil {
-		return fmt.Errorf("Failed to get current user: %s", err)
-	}
-	knownHostsPath := path.Join(curuser.HomeDir, ".ssh", "known_hosts")
-	kh, err := knownhosts.New(knownHostsPath)
-	if err != nil {
-		return err
-	}
-	err = kh(hostname, remote, key)
-
-	if err == nil {
-		return nil
-	}
-
-	if _, ok := err.(*knownhosts.RevokedError); ok {
-		return err
-	}
-
-	keyFingerprintStr := md5String(md5.Sum(key.Marshal()))
-
-	if kErr, ok := err.(*knownhosts.KeyError); ok && len(kErr.Want) > 0 {
-		agent.policy.UI.Alert(fmt.Sprintf(warningRemoteHostChanged, key.Type(), keyFingerprintStr, knownHostsPath))
-		return kErr
-	}
-
-	if agent.policy.UI.Confirm(fmt.Sprintf(promptToTrustHost, hostname, key.Type(), keyFingerprintStr)) {
-		return putHostKey(knownHostsPath, knownhosts.Normalize(hostname), key)
-	}
-
-	return &knownhosts.KeyError{}
 }
 
 func (agent *Agent) proxySSH(scope Scope, toClient net.Conn, toServer net.Conn, control net.Conn, fil *ssh.Filter) error {
@@ -211,9 +55,11 @@ func (agent *Agent) proxySSH(scope Scope, toClient net.Conn, toServer net.Conn, 
 		return fmt.Errorf("Failed to get current user: %s", err)
 	}
 	clientConfig := &ssh.ClientConfig{
-		User:            scope.ServiceUsername,
-		HostKeyCallback: agent.hostKeyCallback,
-		Auth:            []ssh.AuthMethod{agent.getAuth(curuser.HomeDir)},
+		User: scope.ServiceUsername,
+		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+			return HostKeyCallback(hostname, remote, key, agent.policy.UI)
+		},
+		Auth: getAuth(scope.ServiceUsername, scope.ServiceHostname, curuser.HomeDir, agent.policy.UI),
 	}
 
 	meteredConnToServer := CustomConn{Conn: toServer}
@@ -247,7 +93,6 @@ func (agent *Agent) proxySSH(scope Scope, toClient net.Conn, toServer net.Conn, 
 func (agent *Agent) HandleConnection(conn net.Conn) error {
 	log.Printf("New incoming connection")
 
-	remote := false
 	var scope Scope
 	for {
 		msgNum, payload, err := ReadControlPacket(conn)
@@ -259,7 +104,6 @@ func (agent *Agent) HandleConnection(conn net.Conn) error {
 		}
 		switch msgNum {
 		case MsgAgentForwardingNotice:
-			remote = true
 			notice := new(AgentForwardingNoticeMsg)
 			if err := ssh.Unmarshal(payload, notice); err != nil {
 				return fmt.Errorf("Failed to unmarshal AgentForwardingNoticeMsg: %s", err)
@@ -282,25 +126,8 @@ func (agent *Agent) HandleConnection(conn net.Conn) error {
 			}
 			fallthrough
 		default:
-			if remote {
-				WriteControlPacket(conn, MsgAgentFailure, []byte{})
-				return fmt.Errorf("Denied raw remote access to SSH_AUTH_SOCK ")
-			}
-			realAgent, err := net.Dial("unix", agent.realAgentPath)
-			if err != nil {
-				return err
-			}
-			go func() {
-				io.Copy(conn, realAgent)
-			}()
-			if err = WriteControlPacket(realAgent, msgNum, payload); err != nil {
-				return err
-			}
-			go func() {
-				io.Copy(realAgent, conn)
-				realAgent.Close()
-			}()
-			return nil
+			WriteControlPacket(conn, MsgAgentFailure, []byte{})
+			return fmt.Errorf("Unrecognized incoming message: %d", msgNum)
 		}
 	}
 }

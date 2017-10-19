@@ -18,7 +18,7 @@ type UI interface {
 	Confirm(msg string) bool
 	Inform(msg string)
 	Alert(msg string)
-	AskPassword(msg string) ([]byte, error)
+	AskPassword(msg string) (string, error)
 }
 
 type FancyTerminalUI struct {
@@ -90,12 +90,16 @@ func (tui *FancyTerminalUI) Alert(msg string) {
 	fmt.Fprintln(os.Stderr, msg)
 }
 
-func (tui *FancyTerminalUI) AskPassword(msg string) ([]byte, error) {
+func (tui *FancyTerminalUI) AskPassword(msg string) (string, error) {
 	tui.mu.Lock()
 	defer tui.mu.Unlock()
 
 	fmt.Println(msg)
-	return gopass.GetPasswd()
+	passBytes, err := gopass.GetPasswd()
+	if err == nil {
+		return string(passBytes), nil
+	}
+	return "", err
 }
 
 func (tui *FancyTerminalUI) Confirm(msg string) bool {
@@ -130,13 +134,13 @@ func (AskPassUI) Alert(msg string) {
 	cmd.Run()
 }
 
-func (AskPassUI) AskPassword(msg string) ([]byte, error) {
+func (AskPassUI) AskPassword(msg string) (string, error) {
 	cmd := exec.Command("ssh-askpass", msg)
 	out, err := cmd.Output()
 	if err != nil {
-		return out, err
+		return "", err
 	}
-	return []byte(strings.TrimSpace(string(out))), nil
+	return strings.TrimSpace(string(out)), nil
 }
 
 func (apui AskPassUI) Confirm(msg string) bool {
