@@ -2,4 +2,4 @@
 
 command -v autossh >/dev/null 2>&1 || { echo "autossh is required but is not installed.  Aborting." >&2; exit 1; }
 command -v sga-guard-bin >/dev/null 2>&1 || { echo "sga-guard-bin could not be found. Make sure it is installed in the PATH." >&2; exit 1; }
-exec env AUTOSSH_PATH=sga-guard-bin autossh -M 0 -oServerAliveInterval=30 -oServerAliveCountMax=3 -- $*
+exec env AUTOSSH_PATH=sga-guard-bin autossh -M 0 -oServerAliveInterval=3 -oServerAliveCountMax=2 -- $*

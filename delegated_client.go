@@ -101,9 +101,9 @@ func (c *client) Close() error {
 	if c.session != nil {
 		c.session.Close()
 	}
-	// if c.agentConn != nil {
-	// 	c.agentConn.Close()
-	// }
+	if c.agentConn != nil {
+		c.agentConn.Close()
+	}
 	if c.sshClient != nil {
 		c.sshClient.Close()
 	}
@@ -429,7 +429,6 @@ func (c *client) runDelegated() error {
 	}
 
 	ymux, err := yamux.Client(c.agentConn, nil)
-	defer ymux.Close()
 	control, err := ymux.Open()
 	if err != nil {
 		return fmt.Errorf("failed to get control stream: %s", err)
@@ -457,19 +456,29 @@ func (c *client) runDelegated() error {
 	bufferedTraffic := new(bytes.Buffer)
 	bufferedOffset := 0
 
+	runningRoutines := sync.WaitGroup{}
+	defer runningRoutines.Wait()
+
+	runningRoutines.Add(1)
 	go func() {
+		defer runningRoutines.Done()
+
 		_, err := io.Copy(&sshOut, sshPipe)
 		if err != nil {
 			log.Printf("Error copying outgoing SSH data: %s", err)
 		} else {
 			log.Printf("Finished copying outgoing SSH data")
 		}
+		sshOut.mu.Lock()
 		sshOut.Close()
+		sshOut.w = nil
+		sshOut.mu.Unlock()
 	}()
 
 	agentDone := make(chan error, 1)
-
+	runningRoutines.Add(1)
 	go func() {
+		defer runningRoutines.Done()
 		_, err := io.Copy(sshPipe, agentData)
 		if debugClient {
 			log.Printf("Finished copying ssh data from agent: %s", err)
@@ -514,7 +523,9 @@ func (c *client) runDelegated() error {
 
 	}()
 
+	runningRoutines.Add(1)
 	go func() {
+		defer runningRoutines.Done()
 		_, err := io.Copy(&serverOut, serverReader)
 		if debugClient {
 			log.Printf("Finished copying transport data to agent")
@@ -524,12 +535,26 @@ func (c *client) runDelegated() error {
 			log.Printf("To agent transport forwarding failed: %s", err)
 		}
 	}()
-	fromAgentTransportDone := make(chan error)
+	fromAgentTransportDone := make(chan error, 1)
+
+	runningRoutines.Add(1)
 	go func() {
+		defer runningRoutines.Done()
+
 		_, err := io.Copy(serverWriter, &agentTransport)
 		if debugClient {
 			log.Printf("Finished copying transport data from agent")
 		}
+
+		sshOut.mu.Lock()
+		if sshOut.w != nil {
+			sshOut.Close()
+			sshOut.w = serverWriter
+		} else {
+			serverWriter.Close()
+		}
+		sshOut.mu.Unlock()
+
 		if err != nil {
 			fromAgentTransportDone <- fmt.Errorf("failed to copy data from agent to server: %s", err)
 		} else {
@@ -559,10 +584,6 @@ func (c *client) runDelegated() error {
 			return
 		}
 
-		sshOut.mu.Lock()
-		sshOut.w = serverWriter
-		sshOut.mu.Unlock()
-
 		go func() {
 			done <- <-agentDone
 		}()
@@ -585,6 +606,7 @@ func (c *client) runDelegated() error {
 	if c.sshClient == nil {
 		return fmt.Errorf("failed to connect to [%s]: %v", c.HostPort, err)
 	}
+	defer c.sshClient.Close()
 
 	if err = c.startCommand(c.sshClient, c.Cmd); err != nil {
 		return fmt.Errorf("failed to run command: %s", err)

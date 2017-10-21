@@ -115,7 +115,7 @@ func main() {
 		os.Exit(255)
 	}
 
-	fmt.Printf("Listening for incoming Guardian Agent requests from %s...\n", readableName)
+	fmt.Printf("Forwarding to %s setup successfully. Waiting for incoming requests...\n", readableName)
 
 	var c net.Conn
 	for {

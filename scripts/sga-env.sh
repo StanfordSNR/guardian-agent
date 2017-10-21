@@ -9,4 +9,4 @@ export GIT_SSH_COMMAND=sga-ssh
 
 # For tools not providing environment variables, set aliases
 alias mosh="mosh --ssh=sga-ssh"
-alias scp="scp -S sga-"
+alias scp="scp -S sga-scp"
