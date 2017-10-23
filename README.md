@@ -32,6 +32,10 @@ it's allowing a different EC2 machine (that you also are logged in to) to
 connect to some other sensitive server that you have permissions on and add an
 evil key to your authorized_keys file.)
 
+![Compromised](doc/badflow.png)
+
+
+
 SSH Guardian Agent provides secure SSH agent forwarding. A user first runs
 `sga-guard` on her local machine (on which she stores her private SSH keys) to
 securely forward her SSH agent to an intermediary machine (e.g., on AWS). She
