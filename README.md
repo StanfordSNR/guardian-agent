@@ -63,15 +63,34 @@ want to securely forward SSH agent to (the machines on which you want to run an
 SSH client without having the keys on them). **No installation is required on the
 server side.**
 
-1. Install the following dependencies:
-  * OpenSSH client
-  * [autossh](https://linux.die.net/man/1/autossh)
-  * ssh-askpass (MacOS users can use the [following port](https://github.com/theseal/ssh-askpass))
+1. Install the following dependencies: OpenSSH client, autossh, ssh-askpass.
 2. Obtain the [latest
    release](https://github.com/StanfordSNR/guardian-agent/releases/latest) for
    your platform. Alternatively, you may opt to [build from source](#building).
 3. Extract the executables (`sga-guard`, `sga-guard-bin`, `sga-ssh`, and
    `sga-stub`) from the tarball to a **directory in the user's PATH**.
+
+<details><summary>Ubuntu installation</summary><p>
+
+```
+sudo apt-get install openssh-client autossh ssh-askpass
+curl -L https://api.github.com/repos/StanfordSNR/guardian-agent/releases/latest | grep browser_download_url | grep 'linux' | cut -d'"' -f 4 | xargs curl -Ls | tar xzv
+sudo cp sga_linux_amd64/* /usr/local/bin
+```
+
+</p>
+</details>
+
+<details><summary>macOS installation</summary><p>
+
+```
+brew install autossh ssh-askpass
+curl -L https://api.github.com/repos/StanfordSNR/guardian-agent/releases/latest | grep browser_download_url | grep 'darwin' | cut -d'"' -f 4 | xargs curl -L | tar xzv
+sudo cp sga_darwin_amd64/* /usr/local/bin
+```
+
+</p>
+</details>
 
 ## Basic Usage
 
