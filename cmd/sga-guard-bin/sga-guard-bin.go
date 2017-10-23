@@ -110,6 +110,7 @@ func main() {
 		RemoteStubName:     opts.RemoteStubName,
 	}
 
+	fmt.Printf("Connecting to %s to set up forwarding...\n", readableName)
 	if err = sshFwd.SetupForwarding(); err != nil {
 		fmt.Fprintf(os.Stderr, "%s", err)
 		os.Exit(255)
