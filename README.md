@@ -128,6 +128,14 @@ You can also add this line to your `~/.bashrc`/`~.zshrc`/... file on the interme
 
 You can then use `git`, `scp`, `rsync`, `mosh` as you would normally do.
 
+```
+[intermediary]$ git clone git@github.com:user/repo
+...
+[intermediary]$ scp foo.txt remote-host:Documents/foo.txt
+...
+```
+
+
 You can also use `sga-ssh` as a drop-in replacement to an ssh client:
 
 ```
