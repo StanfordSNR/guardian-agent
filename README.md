@@ -1,18 +1,3 @@
----
-
-
-
-## <span style="color:red"> WARNING! </span>
-
-<span style="color:red">
-
-**This tool is in beta and we're working to improve it.
-Feedback is greatly appreciated, but please use at your own risk.**
-
-</span>
-
----
-
 ## SSH Guardian Agent
 
 Traditional ssh-agent forwarding
@@ -59,6 +44,20 @@ bulk of the data is **not** proxied through the local host).
 * [Troubleshooting](#troubleshooting)
 * [Development](#development)
 
+---
+
+
+
+## <span style="color:red"> WARNING! </span>
+
+<span style="color:red">
+
+**This tool is in beta and we're working to improve it.
+Feedback is greatly appreciated, but please use at your own risk.**
+
+</span>
+
+---
 
 ## Installation
 Using SSH Guardian Agent requires installation **both on your local machine** (the
