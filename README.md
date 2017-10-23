@@ -93,12 +93,14 @@ sudo cp sga_darwin_amd64/* /usr/local/bin
 </details>
 
 <details><summary>Other</summary><p>
+
 1. Install the following dependencies: OpenSSH client, autossh, ssh-askpass.
 2. Obtain the [latest
    release](https://github.com/StanfordSNR/guardian-agent/releases/latest) for
    your platform. Alternatively, you may opt to [build from source](#building).
 3. Extract the executables (`sga-guard`, `sga-guard-bin`, `sga-ssh`, and
    `sga-stub`) from the tarball to a **directory in the user's PATH**.
+   
 </p>
 </details>
 
