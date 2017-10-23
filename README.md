@@ -88,10 +88,8 @@ sudo cp sga_darwin_amd64/* /usr/local/bin
 
 </p>
 </details>
-
 </p>
 </details>
-
 <details><summary>Other</summary><p>
 
 1. Install the following dependencies: OpenSSH client, autossh, ssh-askpass.
@@ -100,7 +98,7 @@ sudo cp sga_darwin_amd64/* /usr/local/bin
    your platform. Alternatively, you may opt to [build from source](#building).
 3. Extract the executables (`sga-guard`, `sga-guard-bin`, `sga-ssh`, and
    `sga-stub`) from the tarball to a **directory in the user's PATH**.
-   
+
 </p>
 </details>
 
