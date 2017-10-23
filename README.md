@@ -109,7 +109,7 @@ Start guarded SSH agent forwarding to the intermediary machine:
 
 You should then expect to see the following message:
 ```
-[local]$ sga-guard <intermediary>
+[local]$ sga-guard aws-ubu
 Connecting to aws-ubu to set up forwarding...
 Forwarding to aws-ubu setup successfully. Waiting for incoming requests...
 ```
