@@ -113,17 +113,21 @@ Guarded agent forwarding is now enabled on the intermediary.
 
 ### On the intermediary
 Connect to the intermediary (e.g., using standard ssh or mosh). 
-You can then use `sga-ssh` as a drop-in replacement to an ssh client:
+To enable several common tools (scp, git, rsync, mosh) to use the guardian agent instead of the default
+`ssh` program:
+```
+source sga-env.sh
+```
+You can also add this line to your `~/.bashrc`/`~.zshrc`/... file on the intermediary hosts.
+
+You can then use `git`, `scp`, `rsync`, `mosh` as you would normally do.
+
+You can also use `sga-ssh` as a drop-in replacement to an ssh client:
 
 ```
 [intermediary]$ sga-ssh <server> [command]
 ```
 
-This should trigger a local graphical consent prompt explicitly identifying
-`intermediary`, `server` and `command`.
-
-To enable several common tools (scp, git, rsync, mosh) to use `sga-ssh` instead of the default
-`ssh` program, source [`sga-env.sh`](scripts/sga-env.sh) script in your shell (or in your `~/.bashrc`/`~.zshrc`/... file).
 
 ## Advanced Usage
 
