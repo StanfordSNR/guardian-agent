@@ -196,5 +196,76 @@ go get github.com/StanfordSNR/guardian-agent/...
 In case of [unexpected behavior](https://en.wikipedia.org/wiki/Bug_(software)), please consider opening an issue in our [issue tracker](https://github.com/StanfordSNR/guardian-agent/issues).
 We'd also greatly appreciate if you could run the tool in debug mode by setting the `--debug` and `--logfile=<LOG-FILE>` flags and attach the log file to the issue.
 
+## FAQ
+
+Q: Is `ssh-agent` forwarding really insecure? What is the point of Guardian Agent?
+
+A: The ssh(1) man page warns that "Agent forwarding should be enabled with caution," because
+the `ssh-agent` cannot verify (a) which intermediary machine is making the request, (b)
+which remote server the intermediary wants to authenticate to, or (c) what command the
+intermediary plans to run on the remote server. The agent simply signs a blank check---
+an opaque challenge from an unknown server that will allow the intermediary to execute
+any sequence of commands on the user's behalf. Several
+[commentators](https://heipei.github.io/2015/02/26/SSH-Agent-Forwarding-considered-harmful/)
+[have](https://news.ycombinator.com/item?id=9425805)
+[noted](https://lyte.id.au/2012/03/19/ssh-agent-forwarding-is-a-bug/) that this creates
+risks that may not be widely appreciated.
+
+Guardian Agent is a prototype of a system for secure agent forwarding
+that could be enabled on **every** outgoing connection, because the local agent can
+verify and enforce security policies regarding who wants to do what to whom.
+
+Q: What if I only use `ssh-agent` forwarding when I SSH to intermediaries that I trust?
+
+A: If the user trusts the software (and system administrator) on the
+intermediary host, it is essentially fine to use ssh-agent forwarding
+as it exists today. However, with this level of trust, it may also be
+fine to simply place a private key on the intermediary's hard drive
+and use that to authenticate to remote servers, rather than forwarding
+agent requests back to the local agent.
+
+Q: Can I use this to constrain an intermediary to only pull from (or only push to) a limited
+set of remote Git repositories?
+
+A: Yes, **if** the remote Git server is running an SSH server (such as OpenSSH) that supports `no-more-sessions` and allows Guardian Agent to limit
+the command. (The name of the repository, and the difference between pulling and pushing,
+are both represented in the command.) Among popular Git-hosting services that we
+are aware of, currently only GitLab
+appears to support this currently. GitHub and Bitbucket use other SSH implementations and
+do not allow Guardian Agent to constrain the intermediary to only push or pull from certain
+repositories.
+
+Q: Is Guardian Agent secure?
+
+A: Guardian Agent is a technology preview that was first released for beta testing in October 2017.
+It has not accumulated enough testing and scrutiny to make claims that the implementation is
+bulletproof.
+
+Q: Why did you write Guardian Agent in Go?
+
+A: Guardian Agent is a technology preview intended to solicit feedback from the community,
+especially with regards to the basic design of a secure ssh-agent forwarding mechanism
+that works with unmodified remote SSH servers. We found Go and the Go SSH library to be helpful
+in rapidly prototyping this tool.
+
+Q: What is the connection to Mosh (mobile shell)?
+
+A: Many Mosh users have <a
+href="https://github.com/mobile-shell/mosh/issues/120">asked for
+ssh-agent forwarding support</a>. Guardian Agent was developed by some of the Mosh developers
+and can be used with Mosh today. Based on feedback to this prototype, we may integrate Guardian
+Agent more fully into Mosh as a system for secure ssh-agent forwarding that is safe enough
+to leave on by default.
+
+Q: Who wrote Guardian Agent?
+
+A: Guardian Agent was developed by students and faculty in the
+Stanford University Department of Computer Science (Dima Kogan and
+Henri Stern, advised by Keith Winstein and David Mazières).
+
+Q: Where should I send feedback?
+
+A: Please file an issue on GitHub.
+
 ## Development
 [Detailed Design](doc/design.md)
