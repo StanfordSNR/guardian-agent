@@ -1,6 +1,6 @@
-## SSH Guardian Agent
+## Guardian Agent: secure `ssh-agent` forwarding for Mosh and SSH
 
-Traditional ssh-agent forwarding
+Traditional `ssh-agent` forwarding
 [can](https://heipei.github.io/2015/02/26/SSH-Agent-Forwarding-considered-harmful/)
 [be](https://news.ycombinator.com/item?id=9425805)
 [dangerous](https://lyte.id.au/2012/03/19/ssh-agent-forwarding-is-a-bug/): the
@@ -19,11 +19,9 @@ evil key to your authorized_keys file.)
 
 ![Compromised](doc/badflow2.png)
 
-
-
-SSH Guardian Agent provides secure SSH agent forwarding. A user first runs
+Guardian Agent provides secure `ssh-agent` forwarding. A user first runs
 `sga-guard` on her local machine (on which she stores her private SSH keys) to
-securely forward her SSH agent to an intermediary machine (e.g., on AWS). She
+securely forward her `ssh-agent` to an intermediary machine (e.g., on AWS). She
 can then use `sga-ssh` on the intermediary machine as a drop-in replacement to
 `ssh`. The local `sga-guard` verifies the identity of the **intermediary**, the
 **remote server** and the **command**[<sup>*</sup>](#command-verification),
@@ -60,9 +58,9 @@ Feedback is greatly appreciated, but please use at your own risk.**
 ---
 
 ## Installation
-Using SSH Guardian Agent requires installation **both on your local machine** (the
+Using Guardian Agent requires installation **both on your local machine** (the
 one with your SSH private keys) and on each of the **intermediary machines** you
-want to securely forward SSH agent to (the machines on which you want to run an
+want to securely forward `ssh-agent` to (the machines on which you want to run an
 SSH client without having the keys on them). **No installation is required on the
 server side.**
 
@@ -154,15 +152,15 @@ You can also use `sga-ssh` as a drop-in replacement to an ssh client:
 ### Command verification
 
 Command verification requires the server to support the `no-more-sessions`
-extension. This is extension is present on most openssh servers, but
-unfortunately not implemented on other SSH servers (including github). When
+extension. This is extension is present on OpenSSH servers, but
+unfortunately not implemented on other SSH servers (including GitHub, which uses `libssh`). When
 executing a command on a server that does not support this extension, only the
-idenitity of the intermediary and the identity of the server can be verified
-(which is still much better than standard ssh-agent forwarding).
+identity of the intermediary and the identity of the server can be constrained and verified by the agent
+(but not the contents of the command).
 
 ### Prompt types
 
-Guardian agent supports two types of interactive prompts: graphical and
+Guardian Agent supports two types of interactive prompts: graphical and
 terminal-based. The graphical prompt requires the `DISPLAY` environment variable
 to be set to the appropriate X11 server.  
 If running in a terminal-only session (in which the `DISPLAY` environment
