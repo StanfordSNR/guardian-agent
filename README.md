@@ -4,7 +4,7 @@ Traditional `ssh-agent` forwarding
 [can](https://heipei.github.io/2015/02/26/SSH-Agent-Forwarding-considered-harmful/)
 [be](https://news.ycombinator.com/item?id=9425805)
 [dangerous](https://lyte.id.au/2012/03/19/ssh-agent-forwarding-is-a-bug/): the
-local ssh-agent hast to sign opaque challenges using the user's private key,
+local ssh-agent has to sign opaque challenges with the user's private key,
 without knowing (a) what intermediary host is asking for the signature, (b) what
 remote server that intermediary host wants to authenticate to, or (c) what
 command the intermediary host wants to execute on the remote server. 
@@ -23,8 +23,8 @@ Guardian Agent provides secure `ssh-agent` forwarding. A user first runs
 `sga-guard` on her local machine (on which she stores her private SSH keys) to
 securely forward her `ssh-agent` to an intermediary machine (e.g., on AWS). She
 can then use `sga-ssh` on the intermediary machine as a drop-in replacement to
-`ssh`. The local `sga-guard` verifies the identity of the **intermediary**, the
-**remote server** and the **command**[<sup>*</sup>](#command-verification),
+`ssh`. The local `sga-guard` verifies the identity of (a) the **intermediary** host, (b) the
+**remote server**, and (c) the **command**[<sup>*</sup>](#command-verification),
 either by prompting the user or based on a stored security policy. After all the
 details are verified, the connection is handed off to the intermediary (so the
 bulk of the data is **not** proxied through the local host).
