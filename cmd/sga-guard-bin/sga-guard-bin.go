@@ -42,9 +42,9 @@ func main() {
 		sshFlagsWithValues := "bcDEeFIiLmOopQRWw"
 
 		if isSet {
-			sshOptions = append(sshOptions, fmt.Sprintf("-%s %s", option, val))
+			sshOptions = append(sshOptions, fmt.Sprintf("-%s", option), val)
 		} else if strings.Contains(sshFlagsWithValues, option) {
-			sshOptions = append(sshOptions, fmt.Sprintf("-%s %s", option, args[0]))
+			sshOptions = append(sshOptions, fmt.Sprintf("-%s", option), args[0])
 			args = args[1:]
 		} else {
 			sshOptions = append(sshOptions, fmt.Sprintf("-%s", option))
