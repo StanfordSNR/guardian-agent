@@ -189,7 +189,7 @@ from the local machine:
 go get github.com/StanfordSNR/guardian-agent/...
 ```
 3. Copy the built binaries (`sga-guard-bin`, `sga-ssh`, and `sga-stub`) from `$GOPATH/bin` to a directory in the user's PATH.
-4. Copy the scripts `$GOPATH/StanfordSNR/guardian-agent/scripts/sga-guard` and `$GOPATH/StanfordSNR/guardian-agent/scripts/sga-env.sh` to a directory in the user's PATH.
+4. Copy the scripts `$GOPATH/src/github.com/StanfordSNR/guardian-agent/scripts/sga-guard` and `$GOPATH/src/github.com/StanfordSNR/guardian-agent/scripts/sga-env.sh` to a directory in the user's PATH.
 
 ## Troubleshooting
 
