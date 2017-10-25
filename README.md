@@ -1,10 +1,10 @@
-## SSH Guardian Agent
+## Guardian Agent: secure `ssh-agent` forwarding for Mosh and SSH
 
-Traditional ssh-agent forwarding
+Traditional `ssh-agent` forwarding
 [can](https://heipei.github.io/2015/02/26/SSH-Agent-Forwarding-considered-harmful/)
 [be](https://news.ycombinator.com/item?id=9425805)
 [dangerous](https://lyte.id.au/2012/03/19/ssh-agent-forwarding-is-a-bug/): the
-local ssh-agent hast to sign opaque challenges using the user's private key,
+local ssh-agent has to sign opaque challenges with the user's private key,
 without knowing (a) what intermediary host is asking for the signature, (b) what
 remote server that intermediary host wants to authenticate to, or (c) what
 command the intermediary host wants to execute on the remote server. 
@@ -19,14 +19,12 @@ evil key to your authorized_keys file.)
 
 ![Compromised](doc/badflow2.png)
 
-
-
-SSH Guardian Agent provides secure SSH agent forwarding. A user first runs
+Guardian Agent provides secure `ssh-agent` forwarding. A user first runs
 `sga-guard` on her local machine (on which she stores her private SSH keys) to
-securely forward her SSH agent to an intermediary machine (e.g., on AWS). She
+securely forward her `ssh-agent` to an intermediary machine (e.g., on AWS). She
 can then use `sga-ssh` on the intermediary machine as a drop-in replacement to
-`ssh`. The local `sga-guard` verifies the identity of the **intermediary**, the
-**remote server** and the **command**[<sup>*</sup>](#command-verification),
+`ssh`. The local `sga-guard` verifies the identity of (a) the **intermediary** host, (b) the
+**remote server**, and (c) the **command**[<sup>*</sup>](#command-verification),
 either by prompting the user or based on a stored security policy. After all the
 details are verified, the connection is handed off to the intermediary (so the
 bulk of the data is **not** proxied through the local host).
@@ -43,6 +41,7 @@ bulk of the data is **not** proxied through the local host).
 * [Building from Source](#building-from-source)
 * [Troubleshooting](#troubleshooting)
 * [Development](#development)
+* [FAQ](#faq)
 
 ---
 
@@ -60,9 +59,9 @@ Feedback is greatly appreciated, but please use at your own risk.**
 ---
 
 ## Installation
-Using SSH Guardian Agent requires installation **both on your local machine** (the
+Using Guardian Agent requires installation **both on your local machine** (the
 one with your SSH private keys) and on each of the **intermediary machines** you
-want to securely forward SSH agent to (the machines on which you want to run an
+want to securely forward `ssh-agent` to (the machines on which you want to run an
 SSH client without having the keys on them). **No installation is required on the
 server side.**
 
@@ -94,7 +93,7 @@ sudo cp sga_darwin_amd64/* /usr/local/bin
 1. Install the following dependencies: OpenSSH client, autossh, ssh-askpass.
 2. Obtain the [latest
    release](https://github.com/StanfordSNR/guardian-agent/releases/latest) for
-   your platform. Alternatively, you may opt to [build from source](#building).
+   your platform. Alternatively, you may opt to [build from source](#building-from-source).
 3. Extract the executables (`sga-guard`, `sga-guard-bin`, `sga-ssh`, and
    `sga-stub`) from the tarball to a **directory in the user's PATH**.
 
@@ -154,15 +153,15 @@ You can also use `sga-ssh` as a drop-in replacement to an ssh client:
 ### Command verification
 
 Command verification requires the server to support the `no-more-sessions`
-extension. This is extension is present on most openssh servers, but
-unfortunately not implemented on other SSH servers (including github). When
+extension. This is extension is present on OpenSSH servers, but
+unfortunately not implemented on other SSH servers (including GitHub, which uses `libssh`). When
 executing a command on a server that does not support this extension, only the
-idenitity of the intermediary and the identity of the server can be verified
-(which is still much better than standard ssh-agent forwarding).
+identity of the intermediary and the identity of the server can be constrained and verified by the agent
+(but not the contents of the command).
 
 ### Prompt types
 
-Guardian agent supports two types of interactive prompts: graphical and
+Guardian Agent supports two types of interactive prompts: graphical and
 terminal-based. The graphical prompt requires the `DISPLAY` environment variable
 to be set to the appropriate X11 server.  
 If running in a terminal-only session (in which the `DISPLAY` environment
@@ -191,12 +190,83 @@ from the local machine:
 go get github.com/StanfordSNR/guardian-agent/...
 ```
 3. Copy the built binaries (`sga-guard-bin`, `sga-ssh`, and `sga-stub`) from `$GOPATH/bin` to a directory in the user's PATH.
-4. Copy the scripts `$GOPATH/StanfordSNR/guardian-agent/scripts/sga-guard` and `$GOPATH/StanfordSNR/guardian-agent/scripts/sga-env.sh` to a directory in the user's PATH.
+4. Copy the scripts `$GOPATH/src/github.com/StanfordSNR/guardian-agent/scripts/sga-guard` and `$GOPATH/src/github.com/StanfordSNR/guardian-agent/scripts/sga-env.sh` to a directory in the user's PATH.
 
 ## Troubleshooting
 
 In case of [unexpected behavior](https://en.wikipedia.org/wiki/Bug_(software)), please consider opening an issue in our [issue tracker](https://github.com/StanfordSNR/guardian-agent/issues).
 We'd also greatly appreciate if you could run the tool in debug mode by setting the `--debug` and `--logfile=<LOG-FILE>` flags and attach the log file to the issue.
+
+## FAQ
+
+Q: Is `ssh-agent` forwarding really insecure? What is the point of Guardian Agent?
+
+A: The ssh(1) man page warns that "Agent forwarding should be enabled with caution," because
+the `ssh-agent` cannot verify (a) which intermediary machine is making the request, (b)
+which remote server the intermediary wants to authenticate to, or (c) what command the
+intermediary plans to run on the remote server. The agent simply signs a blank check---
+an opaque challenge from an unknown server that will allow the intermediary to execute
+any sequence of commands on the user's behalf. Several
+[commentators](https://heipei.github.io/2015/02/26/SSH-Agent-Forwarding-considered-harmful/)
+[have](https://news.ycombinator.com/item?id=9425805)
+[noted](https://lyte.id.au/2012/03/19/ssh-agent-forwarding-is-a-bug/) that this creates
+risks that may not be widely appreciated.
+
+Guardian Agent is a prototype of a system for secure agent forwarding
+that could be enabled on **every** outgoing connection, because the local agent can
+verify and enforce security policies regarding who wants to do what to whom.
+
+Q: What if I only use `ssh-agent` forwarding when I SSH to intermediaries that I trust?
+
+A: If the user trusts the software (and system administrator) on the
+intermediary host, it is essentially fine to use ssh-agent forwarding
+as it exists today. However, with this level of trust, it may also be
+fine to simply place a private key on the intermediary's hard drive
+and use that to authenticate to remote servers, rather than forwarding
+agent requests back to the local agent.
+
+Q: Can I use this to constrain an intermediary to only pull from (or only push to) a limited
+set of remote Git repositories?
+
+A: Yes, **if** the remote Git server is running an SSH server (such as OpenSSH) that supports `no-more-sessions` and allows Guardian Agent to limit
+the command. (The name of the repository, and the difference between pulling and pushing,
+are both represented in the command.) Among popular Git-hosting services that we
+are aware of, currently only GitLab
+appears to support this currently. GitHub and Bitbucket use other SSH implementations and
+do not allow Guardian Agent to constrain the intermediary to only push or pull from certain
+repositories.
+
+Q: Is Guardian Agent secure?
+
+A: Guardian Agent is a technology preview that was first released for beta testing in October 2017.
+It has not accumulated enough testing and scrutiny to make claims that the implementation is
+bulletproof.
+
+Q: Why did you write Guardian Agent in Go?
+
+A: Guardian Agent is a technology preview intended to solicit feedback from the community,
+especially with regards to the basic design of a secure ssh-agent forwarding mechanism
+that works with unmodified remote SSH servers. We found Go and the Go SSH library to be helpful
+in rapidly prototyping this tool.
+
+Q: What is the connection to Mosh (mobile shell)?
+
+A: Many Mosh users have <a
+href="https://github.com/mobile-shell/mosh/issues/120">asked for
+ssh-agent forwarding support</a>. Guardian Agent was developed by some of the Mosh developers
+and can be used with Mosh today. Based on feedback to this prototype, we may integrate Guardian
+Agent more fully into Mosh as a system for secure ssh-agent forwarding that is safe enough
+to leave on by default.
+
+Q: Who wrote Guardian Agent?
+
+A: Guardian Agent was developed by students and faculty in the
+Stanford University Department of Computer Science (Dima Kogan and
+Henri Stern, advised by Keith Winstein and David Mazières).
+
+Q: Where should I send feedback?
+
+A: Please file an issue on GitHub.
 
 ## Development
 [Detailed Design](doc/design.md)
