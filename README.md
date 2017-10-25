@@ -41,6 +41,7 @@ bulk of the data is **not** proxied through the local host).
 * [Building from Source](#building-from-source)
 * [Troubleshooting](#troubleshooting)
 * [Development](#development)
+* [FAQ](#faq)
 
 ---
 
