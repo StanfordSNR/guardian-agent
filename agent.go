@@ -7,9 +7,11 @@ import (
 	"net"
 	"os"
 	"os/user"
+	"path"
 
 	"github.com/hashicorp/yamux"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 	"golang.org/x/crypto/ssh/terminal"
 )
 
@@ -54,12 +56,14 @@ func (agent *Agent) proxySSH(scope Scope, toClient net.Conn, toServer net.Conn, 
 	if err != nil {
 		return fmt.Errorf("Failed to get current user: %s", err)
 	}
+
 	clientConfig := &ssh.ClientConfig{
 		User: scope.ServiceUsername,
 		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 			return HostKeyCallback(hostname, remote, key, agent.policy.UI)
 		},
-		Auth: getAuth(scope.ServiceUsername, scope.ServiceHostname, curuser.HomeDir, agent.policy.UI),
+		Auth:              getAuth(scope.ServiceUsername, scope.ServiceHostname, curuser.HomeDir, agent.policy.UI),
+		HostKeyAlgorithms: knownhosts.OrderHostKeyAlgs(scope.ServiceHostname, toServer.RemoteAddr(), path.Join(curuser.HomeDir, ".ssh", "known_hosts")),
 	}
 
 	meteredConnToServer := CustomConn{Conn: toServer}
