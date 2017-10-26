@@ -47,19 +47,29 @@ type options struct {
 
 func main() {
 	var opts options
-	var parser = flags.NewParser(&opts, flags.Default)
+	var parser = flags.NewParser(&opts, flags.HelpFlag|flags.PassDoubleDash)
 	parser.UnknownOptionHandler = func(option string, arg flags.SplitArgument, args []string) ([]string, error) {
 		fmt.Fprintf(os.Stderr, "Unknown option: %s\n", option)
 		return args, nil
 	}
 
 	_, err := parser.Parse()
+	if opts.Version {
+		fmt.Println(guardianagent.Version)
+		os.Exit(0)
+	}
+
 	if err != nil {
-		if flagsErr, ok := err.(*flags.Error); ok && flagsErr.Type == flags.ErrHelp {
-			os.Exit(0)
-		} else {
+		if flagsErr, ok := err.(*flags.Error); ok {
+			if flagsErr.Type == flags.ErrHelp {
+				fmt.Println(flagsErr.Message)
+				os.Exit(0)
+			}
+			fmt.Fprintln(os.Stderr, flagsErr.Message)
 			os.Exit(255)
 		}
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		os.Exit(255)
 	}
 
 	var proxyCommand string

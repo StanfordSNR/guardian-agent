@@ -35,7 +35,7 @@ type options struct {
 
 func main() {
 	var opts options
-	var parser = flags.NewParser(&opts, flags.Default)
+	var parser = flags.NewParser(&opts, flags.HelpFlag|flags.PassDoubleDash)
 	var sshOptions []string
 	parser.UnknownOptionHandler = func(option string, arg flags.SplitArgument, args []string) ([]string, error) {
 		val, isSet := arg.Value()
@@ -54,18 +54,22 @@ func main() {
 
 	_, err := parser.Parse()
 
-	if err != nil {
-		fmt.Fprintf(os.Stderr, parser.Usage)
-		if flagsErr, ok := err.(*flags.Error); ok && flagsErr.Type == flags.ErrHelp {
-			os.Exit(0)
-		} else {
-			os.Exit(255)
-		}
+	if opts.Version {
+		fmt.Println(guardianagent.Version)
+		os.Exit(0)
 	}
 
-	if opts.Version {
-		fmt.Println(version)
-		os.Exit(0)
+	if err != nil {
+		if flagsErr, ok := err.(*flags.Error); ok {
+			if flagsErr.Type == flags.ErrHelp {
+				fmt.Println(flagsErr.Message)
+				os.Exit(0)
+			}
+			fmt.Fprintln(os.Stderr, flagsErr.Message)
+			os.Exit(255)
+		}
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		os.Exit(255)
 	}
 
 	readableName := opts.SSHCommand.UserHost

@@ -21,7 +21,7 @@ import (
 	"golang.org/x/crypto/ssh/knownhosts"
 )
 
-var version string
+var Version string
 
 const debugCommon = false
 
@@ -185,7 +185,7 @@ type CommonOptions struct {
 
 	LogFile string `long:"log" description:"log file"`
 
-	Version bool `long:"version" short:"V" description:"Display the version number and exit" default:"false"`
+	Version bool `long:"version" short:"V" description:"Display the version number and exit"`
 }
 
 // Adapted from https://github.com/coreos/fleet/blob/master/ssh/known_hosts.go
