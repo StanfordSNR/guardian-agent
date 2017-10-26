@@ -21,6 +21,8 @@ import (
 	"golang.org/x/crypto/ssh/knownhosts"
 )
 
+var version string
+
 const debugCommon = false
 
 const AgentGuardExtensionType = "agent-guard@cs.stanford.edu"
@@ -182,6 +184,8 @@ type CommonOptions struct {
 	Username string `short:"l" description:"Specifies the user to log in as on the remote machine"`
 
 	LogFile string `long:"log" description:"log file"`
+
+	Version bool `long:"version" short:"V" description:"Display the version number and exit" default:"false"`
 }
 
 // Adapted from https://github.com/coreos/fleet/blob/master/ssh/known_hosts.go

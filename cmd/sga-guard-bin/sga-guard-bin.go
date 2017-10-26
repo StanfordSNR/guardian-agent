@@ -63,6 +63,11 @@ func main() {
 		}
 	}
 
+	if opts.Version {
+		fmt.Println(version)
+		os.Exit(0)
+	}
+
 	readableName := opts.SSHCommand.UserHost
 	if parser.FindOptionByShortName('l').IsSet() {
 		readableName = opts.Username + "@" + readableName
