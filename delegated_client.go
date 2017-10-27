@@ -87,9 +87,10 @@ func (sw *settableWriter) Write(p []byte) (n int, err error) {
 }
 
 func (sw *settableWriter) Close() error {
-	v, ok := sw.w.(io.Closer)
-	if ok {
-		return v.Close()
+	if cw, ok := sw.w.(CloseWriter); ok {
+		return cw.CloseWrite()
+	} else if c, ok := sw.w.(io.Closer); ok {
+		return c.Close()
 	}
 	return nil
 }
@@ -305,6 +306,10 @@ func syncBufferedTraffic(bufferedTraffic *bytes.Buffer, bufferedOffset int, hand
 	return nil
 }
 
+type CloseWriter interface {
+	CloseWrite() error
+}
+
 func (c *client) connectToServer() (reader io.ReadCloser, writer io.WriteCloser, err error) {
 	if c.ProxyCommand != "" {
 		proxyChild := exec.Command(os.Getenv("SHELL"), "-c", "exec "+c.ProxyCommand)
@@ -354,12 +359,15 @@ func (c *client) runDirect() error {
 	serverEnd, clientEnd := net.Pipe()
 	go func() {
 		io.Copy(serverWriter, serverEnd)
-		serverWriter.Close()
+		if cw, ok := serverWriter.(CloseWriter); ok {
+			cw.CloseWrite()
+		} else {
+			serverWriter.Close()
+		}
 	}()
 
 	go func() {
 		io.Copy(serverEnd, serverReader)
-		log.Printf("finished copying from serverreader")
 		serverEnd.Close()
 	}()
 
@@ -551,7 +559,13 @@ func (c *client) runDelegated() error {
 			sshOut.Close()
 			sshOut.w = serverWriter
 		} else {
-			serverWriter.Close()
+			if cw, ok := serverWriter.(CloseWriter); ok {
+				log.Printf("CloseWrite serverWriter")
+				cw.CloseWrite()
+			} else {
+				log.Printf("Close serverWriter")
+				serverWriter.Close()
+			}
 		}
 		sshOut.mu.Unlock()
 

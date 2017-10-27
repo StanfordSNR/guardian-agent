@@ -71,11 +71,6 @@ func (agent *Agent) proxySSH(scope Scope, toClient net.Conn, toServer net.Conn, 
 	if err != nil {
 		return err
 	}
-	err = proxy.UpdateClientSessionParams()
-	if err != nil {
-		return err
-	}
-
 	done := proxy.Run()
 
 	err = <-done
