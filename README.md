@@ -48,10 +48,10 @@ bulk of the data is **not** proxied through the local host).
 
 <div style="text-align: center;">
 <img src="doc/animation.gif" alt="Example" width="70%" align="middle" display="block">
-</a>
 </div>
+<br clear="all" />
 
-Our research paper will appear in [HotNets 2017](https://conferences.sigcomm.org/hotnets/2017/program.html):
+Our research paper will appear in <a href="https://conferences.sigcomm.org/hotnets/2017/program.html">HotNets 2017</a>
 
 <div style="text-align: center;">
 <a href="doc/hotnets17.pdf">
