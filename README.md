@@ -1,5 +1,19 @@
 ## Guardian Agent: secure `ssh-agent` forwarding for Mosh and SSH
 
+* [Installation](#installation)
+* [Basic Usage](#basic-usage)
+* [Advanced Usage](#advanced-usage)
+  * [Command verification](#command-verification)
+  * [Prompt types](#prompt-types)
+  * [Customizing the SSH command](#customizing-the-ssh-command)
+  * [Stub location](#stub-location)
+* [Building from Source](#building-from-source)
+* [Troubleshooting](#troubleshooting)
+* [Development](#development)
+* [FAQ](#faq)
+
+---
+
 Traditional `ssh-agent` forwarding
 [can](https://heipei.github.io/2015/02/26/SSH-Agent-Forwarding-considered-harmful/)
 [be](https://news.ycombinator.com/item?id=9425805)
@@ -17,7 +31,7 @@ it's allowing a different EC2 machine (that you also are logged in to) to
 connect to some other sensitive server that you have permissions on and add an
 evil key to your authorized_keys file.)
 
-![Compromised](doc/badflow2.png)
+![Compromised](doc/badflow.svg)
 
 Guardian Agent provides secure `ssh-agent` forwarding. A user first runs
 `sga-guard` on her local machine (on which she stores her private SSH keys) to
@@ -29,22 +43,18 @@ either by prompting the user or based on a stored security policy. After all the
 details are verified, the connection is handed off to the intermediary (so the
 bulk of the data is **not** proxied through the local host).
 
-![Example](animation.gif)
+<div style="text-align: center;">
+<img src="doc/animation.gif" alt="Example" width="50%" align="middle" display="block">
+</a>
+</div>
 
-* [Installation](#installation)
-* [Basic Usage](#basic-usage)
-* [Advanced Usage](#advanced-usage)
-  * [Command verification](#command-verification)
-  * [Prompt types](#prompt-types)
-  * [Customizing the SSH command](#customizing-the-ssh-command)
-  * [Stub location](#stub-location)
-* [Building from Source](#building-from-source)
-* [Troubleshooting](#troubleshooting)
-* [Development](#development)
-* [FAQ](#faq)
+Our research paper will appear in [HotNets 2017](https://conferences.sigcomm.org/hotnets/2017/program.html):
 
----
-
+<div style="text-align: center;">
+<a href="doc/hotnets17.pdf">
+<img src="doc/paper-page1.svg" alt="Paper" width="50%" align="middle" display="block">
+</a>
+</div>
 
 
 ## <span style="color:red"> WARNING! </span>
