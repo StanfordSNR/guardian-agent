@@ -33,10 +33,9 @@ it's allowing a different EC2 machine (that you also are logged in to) to
 connect to some other sensitive server that you have permissions on and add an
 evil key to your authorized_keys file.)
 
-<div style="text-align: center;">
+<p align="center">
 <img src="doc/badflow2.png" alt="Example" width="70%" align="middle" display="block">
-</a>
-</div>
+</p>
 
 Guardian Agent provides secure `ssh-agent` forwarding. A user first runs
 `sga-guard` on her local machine (on which she stores her private SSH keys) to
@@ -48,18 +47,18 @@ either by prompting the user or based on a stored security policy. After all the
 details are verified, the connection is handed off to the intermediary (so the
 bulk of the data is **not** proxied through the local host).
 
-<div style="text-align: center;">
+<p align="center">
 <img src="doc/animation.gif" alt="Example" width="70%" align="middle" display="block">
-</div>
+</p>
 <br clear="all" />
 
-Our research paper will appear in <a href="https://conferences.sigcomm.org/hotnets/2017/program.html">HotNets 2017</a>
+Our research paper will appear in <a href="https://conferences.sigcomm.org/hotnets/2017/program.html">HotNets 2017:</a>
 
-<div style="text-align: center;">
+<p align="center">
 <a href="doc/hotnets17.pdf">
-<img src="doc/paper-page1.svg" alt="Paper" width="50%" align="middle" display="block">
+<img src="doc/paper-page1.svg" alt="Paper" width="40%" align="middle" display="block">
 </a>
-</div>
+</p>
 
 
 ## <span style="color:red"> WARNING! </span>
