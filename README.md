@@ -12,7 +12,10 @@ the agent information about which host is asking to perform a command
 on the user's behalf, which server that hosts wants to connect to,
 or which command the host wants to perform:
 
-![](doc/ssh-askpass-default.svg)
+
+<p align="center">
+<img src="doc/ssh-askpass-default.svg" width="50%">
+</p>
 
 By contrast, **Guardian Agent** provides secure `ssh-agent` forwarding
 and can be used alongside Mosh or SSH and safely enabled on any
@@ -26,9 +29,9 @@ the user or based on a stored policy. No changes to the server are
 required, but full functionality is only available when connecting to
 servers running OpenSSH.
 
-![](doc/ssh-askpass-sga.svg)
-
-Based on feedback to this beta, we may incorporate Guardian Agent more deeply into Mosh.
+<p align="center">
+<img src="doc/ssh-askpass-sga.svg" width="50%">
+</p>
 
 ## Research paper
 
