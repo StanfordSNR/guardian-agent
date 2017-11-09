@@ -17,9 +17,11 @@ or which command the host wants to perform:
 <img src="doc/ssh-askpass-default.svg" width="50%">
 </p>
 
-By contrast, **Guardian Agent** provides secure `ssh-agent` forwarding
-and can be used alongside Mosh or SSH and safely enabled on any
-connection. A user runs `sga-guard` on her local machine to establish
+By contrast, Guardian Agent provides more constrained agent forwarding
+that can safely be enabled on any connection. It can be used
+alongside Mosh or SSH.
+
+**How it works:** A user runs `sga-guard` on her local machine to establish
 a secure forwarding channel to an intermediary host (e.g. in EC2). On
 the intermediary machine, she can then use `sga-ssh` as a drop-in
 replacement for `ssh`. The local `sga-guard` verifies the identity of
@@ -33,7 +35,7 @@ servers running OpenSSH.
 <img src="doc/ssh-askpass-sga.svg" width="50%">
 </p>
 
-Based on feedback to this beta, we may incorporate Guardian Agent more deeply into Mosh.
+Based on feedback to this beta/prototype, we may incorporate the techniques behind Guardian Agent more deeply into [Mosh](https://mosh.org).
 
 ## Research paper
 
