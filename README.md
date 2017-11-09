@@ -47,10 +47,11 @@ either by prompting the user or based on a stored security policy. After all the
 details are verified, the connection is handed off to the intermediary (so the
 bulk of the data is **not** proxied through the local host).
 
-<p align="center">
-<img src="doc/animation.gif" alt="Example" width="70%" align="middle" display="block">
-</p>
-<br clear="all" />
+With traditional `ssh-agent` forwarding:
+![](doc/ssh-askpass-default.svg) 
+
+With **Guardian Agent**:
+![](doc/ssh-askpass-sga.svg)
 
 Our research paper will appear in <a href="https://conferences.sigcomm.org/hotnets/2017/program.html">HotNets 2017:</a>
 
