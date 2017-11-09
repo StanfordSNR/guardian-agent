@@ -305,3 +305,7 @@ Q: Where should I send feedback?
 
 A: Please file an issue on GitHub.
 
+Q: Where can I read more about how Guardian Agent works?
+
+A: Please read our <a href="doc/hotnets17.pdf">research
+paper</a> or the detailed [design document](doc/design.md).
