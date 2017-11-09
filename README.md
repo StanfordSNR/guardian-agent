@@ -1,59 +1,34 @@
-## Guardian Agent: secure `ssh-agent` forwarding for Mosh and SSH
+## Guardian Agent: secure agent forwarding for Mosh or SSH
 
-* [Overview](#overview)
-* [Installation](#installation)
-* [Basic Usage](#basic-usage)
-* [Advanced Usage](#advanced-usage)
-  * [Command verification](#command-verification)
-  * [Prompt types](#prompt-types)
-  * [Customizing the SSH command](#customizing-the-ssh-command)
-  * [Stub location](#stub-location)
-* [Building from Source](#building-from-source)
-* [Troubleshooting](#troubleshooting)
-* [Development](#development)
-* [FAQ](#faq)
+Guardian Agent (now in beta) allows users to **securely** empower
+remote hosts to take actions on their behalf, using their SSH
+credentials. It allows Mosh and SSH users to enable agent forwarding
+for every connection, even to hosts they may not fully trust.
 
----
-## Overview
+Guardian Agent is an alternative to traditional `ssh-agent`
+forwarding, which can only safely be enabled when connecting to
+trusted hosts. The traditional `ssh-agent` protocol doesn't give
+the agent information about which host is asking to perform a command
+on the user's behalf, which server that hosts wants to connect to,
+or which command the host wants to perform:
 
-Traditional `ssh-agent` forwarding
-[can](https://heipei.github.io/2015/02/26/SSH-Agent-Forwarding-considered-harmful/)
-[be](https://news.ycombinator.com/item?id=9425805)
-[dangerous](https://lyte.id.au/2012/03/19/ssh-agent-forwarding-is-a-bug/): the
-local ssh-agent has to sign opaque challenges with the user's private key,
-without knowing (a) what intermediary host is asking for the signature, (b) what
-remote server that intermediary host wants to authenticate to, or (c) what
-command the intermediary host wants to execute on the remote server. 
+<img src="doc/ssh-askpass-default.svg" size="40%">
 
-A compromised intermediary can send rogue challenges and use the user's identity
-to authenticate to other servers or to run unauthorized commands. So you might
-enable ssh-agent forwarding and be asked yes or no on signing "something," and
-you think it's allowing an EC2 machine to run "git push" to GitHub. But actually
-it's allowing a different EC2 machine (that you also are logged in to) to
-connect to some other sensitive server that you have permissions on and add an
-evil key to your authorized_keys file.)
-
-<p align="center">
-<img src="doc/badflow2.png" alt="Example" width="70%" align="middle" display="block">
-</p>
-
-Guardian Agent provides secure `ssh-agent` forwarding. A user first runs
+By contrast,
+Guardian Agent provides secure `ssh-agent` forwarding and can be used
+alongside Mosh or SSH. A user runs
 `sga-guard` on her local machine (on which she stores her private SSH keys) to
 securely forward her `ssh-agent` to an intermediary machine (e.g., on AWS). She
 can then use `sga-ssh` on the intermediary machine as a drop-in replacement to
 `ssh`. The local `sga-guard` verifies the identity of (a) the **intermediary** host, (b) the
 **remote server**, and (c) the **command**[<sup>*</sup>](#command-verification),
-either by prompting the user or based on a stored security policy. After all the
-details are verified, the connection is handed off to the intermediary (so the
-bulk of the data is **not** proxied through the local host).
+either by prompting the user or based on a stored security policy.
 
-With traditional `ssh-agent` forwarding:
-![](doc/ssh-askpass-default.svg) 
+<img src="doc/ssh-askpass-sga.svg" size="40%">
 
-With **Guardian Agent**:
-![](doc/ssh-askpass-sga.svg)
+## Research paper
 
-Our research paper will appear in <a href="https://conferences.sigcomm.org/hotnets/2017/program.html">HotNets 2017:</a>
+Our paper will appear in <a href="https://conferences.sigcomm.org/hotnets/2017/program.html">HotNets 2017:</a>
 
 <p align="center">
 <a href="doc/hotnets17.pdf">
@@ -221,15 +196,33 @@ the `ssh-agent` cannot verify (a) which intermediary machine is making the reque
 which remote server the intermediary wants to authenticate to, or (c) what command the
 intermediary plans to run on the remote server. The agent simply signs a blank check---
 an opaque challenge from an unknown server that will allow the intermediary to execute
-any sequence of commands on the user's behalf. Several
+any sequence of commands on the user's behalf.
+
+As a result, ssh-agent forwarding can only be used safely when the
+user trusts the remote host.  Several
 [commentators](https://heipei.github.io/2015/02/26/SSH-Agent-Forwarding-considered-harmful/)
 [have](https://news.ycombinator.com/item?id=9425805)
-[noted](https://lyte.id.au/2012/03/19/ssh-agent-forwarding-is-a-bug/) that this creates
-risks that may not be widely appreciated.
+[noted](https://lyte.id.au/2012/03/19/ssh-agent-forwarding-is-a-bug/)
+that this creates risks that may not be widely appreciated.
 
 Guardian Agent is a prototype of a system for secure agent forwarding
 that could be enabled on **every** outgoing connection, because the local agent can
 verify and enforce security policies regarding who wants to do what to whom.
+
+
+A compromised or malevolent intermediary can send rogue challenges and
+use the user's identity to authenticate to other servers or to run
+unauthorized commands. So you might enable ssh-agent forwarding and be
+asked yes or no on signing "something," and you think it's allowing an
+EC2 machine to run "git push" to GitHub. But actually it's allowing a
+different EC2 machine (that you also are logged in to) to connect to
+some other sensitive server that you have permissions on and add an
+evil key to your authorized_keys file.)
+
+<p align="center">
+<img src="doc/badflow2.png" alt="Example" width="70%" align="middle" display="block">
+</p>
+
 
 Q: What if I only use `ssh-agent` forwarding when I SSH to intermediaries that I trust?
 
