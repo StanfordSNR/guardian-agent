@@ -33,6 +33,8 @@ servers running OpenSSH.
 <img src="doc/ssh-askpass-sga.svg" width="50%">
 </p>
 
+Based on feedback to this beta, we may incorporate Guardian Agent more deeply into Mosh.
+
 ## Research paper
 
 Our paper will appear in <a href="https://conferences.sigcomm.org/hotnets/2017/program.html">HotNets 2017:</a>
