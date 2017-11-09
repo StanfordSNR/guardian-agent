@@ -17,11 +17,11 @@ or which command the host wants to perform:
 <img src="doc/ssh-askpass-default.svg" width="50%">
 </p>
 
-By contrast, Guardian Agent provides more constrained agent forwarding
+By contrast, Guardian Agent provides more-constrained agent forwarding
 that can safely be enabled on any connection. It can be used
 alongside Mosh or SSH.
 
-**How it works:** A user runs `sga-guard` on her local machine to establish
+To use Guardian Agent, a user runs `sga-guard` on her local machine to establish
 a secure forwarding channel to an intermediary host (e.g. in EC2). On
 the intermediary machine, she can then use `sga-ssh` as a drop-in
 replacement for `ssh`. The local `sga-guard` verifies the identity of
@@ -37,29 +37,54 @@ servers running OpenSSH.
 
 Based on feedback to this beta/prototype, we may incorporate the techniques behind Guardian Agent more deeply into [Mosh](https://mosh.org).
 
-## Research paper
+## How does Guardian Agent work?
 
-Our paper will appear in <a href="https://conferences.sigcomm.org/hotnets/2017/program.html">HotNets 2017:</a>
+Guardian Agent allows an **SSH client** (`sga-ssh`), running on a
+partially trusted machine, to request the **SSH agent** (`sga-guard`),
+running on a trusted machine, to execute commands on an **SSH server**
+(e.g., GitLab), such that the identity of the server as well as the
+SSH session command can be verified by the SSH agent, with the
+server's own code unaltered.
+
+The scheme works by first having `sga-ssh` (on the intermediary host)
+request that the user's agent allow it to run a particular command on
+a particular server. The user approves or denies the request, or the request
+is auto-approved according to a pre-existing policy. (These policies are stored
+in the `~/.ssh/sga_policy` file.)
+
+If approved, `sga-ssh` then establishes a TCP connection to the
+server, and securely tunnels it back to `sga-guard`. `sga-guard` then
+establishes an end-to-end authenticated SSH connection directly with
+the server, over the forwarded TCP connection. The local machine
+allows the delegate to issue the approved command, and then to
+``lock'' the session by using the `no-more-sessions` request, so that
+no more commands may be issued on this connection.
+
+After the session is locked, `sga-guard` allows `sga-ssh` to rekey the
+session, taking over in the middle of the connection, and reusing the
+existing TCP connection to the server. From this point, `sga-ssh` can complete the operation, with data flowing directly between the intermediary and the server (as in traditional `ssh-agent` forwarding).
+
+For more, please read our <a href="doc/hotnets17.pdf">research
+paper</a> or the detailed [design document](doc/design.md).
 
 <p align="center">
+The Case for Secure Delegation (to appear at ACM HotNets 2017)
 <a href="doc/hotnets17.pdf">
 <img src="doc/paper-page1.svg" alt="Paper" width="40%" align="middle" display="block">
 </a>
 </p>
 
 
-## <span style="color:red"> WARNING! </span>
+---
 
+## Installation
 <span style="color:red">
 
-**This tool is in beta and we're working to improve it.
+**Warning: this tool is in beta and is intended as a technology prototype. It was first released in October 2017.
 Feedback is greatly appreciated, but please use at your own risk.**
 
 </span>
 
----
-
-## Installation
 Using Guardian Agent requires installation **both on your local machine** (the
 one with your SSH private keys) and on each of the **intermediary machines** you
 want to securely forward `ssh-agent` to (the machines on which you want to run an
@@ -285,32 +310,3 @@ Q: Where should I send feedback?
 
 A: Please file an issue on GitHub.
 
-## How does Guardian Agent work?
-
-Guardian Agent allows an **SSH client** (`sga-ssh`), running on a
-partially trusted machine, to request the **SSH agent** (`sga-guard`),
-running on a trusted machine, to execute commands on an **SSH server**
-(e.g., GitLab), such that the identity of the server as well as the
-SSH session command can be verified by the SSH agent, with the
-server's own code unaltered.
-
-The scheme works by first having `sga-ssh` (on the intermediary host)
-request that the user's agent allow it to run a particular command on
-a particular server. The user approves or denies the request, or the request
-is auto-approved according to a pre-existing policy. (These policies are stored
-in the `~/.ssh/sga_policy` file.)
-
-If approved, `sga-ssh` then establishes a TCP connection to the
-server, and securely tunnels it back to `sga-guard`. `sga-guard` then
-establishes an end-to-end authenticated SSH connection directly with
-the server, over the forwarded TCP connection. The local machine
-allows the delegate to issue the approved command, and then to
-``lock'' the session by using the `no-more-sessions` request, so that
-no more commands may be issued on this connection.
-
-After the session is locked, `sga-guard` allows `sga-ssh` to rekey the
-session, taking over in the middle of the connection, and reusing the
-existing TCP connection to the server. From this point, `sga-ssh` can complete the operation, with data flowing directly between the intermediary and the server (as in traditional `ssh-agent` forwarding).
-
-For more, please read our <a href="doc/hotnets17.pdf">research
-paper</a> or the detailed [design document](doc/design.md).
