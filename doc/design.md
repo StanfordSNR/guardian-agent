@@ -1,7 +1,7 @@
-# SSH Guardian Agent Design
+# Guardian Agent Design
 
 ## Overview
-SSH Guardian Agent allows an **SSH client**, running on a partially
+Guardian Agent allows an **SSH client**, running on a partially
 trusted machine, to request the **SSH agent**, running on a trusted machine,
 to execute commands on an **SSH server**, such that the identity of
 the server as well as the SSH session command can be verified by the SSH agent,
