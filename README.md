@@ -74,16 +74,10 @@ The Case for Secure Delegation (to appear at ACM HotNets 2017)
 </a>
 </p>
 
-
----
-
 ## Installation
-<span style="color:red">
 
 **Warning: this tool is in beta and is intended as a technology prototype. It was first released in October 2017.
 Feedback is greatly appreciated, but please use at your own risk.**
-
-</span>
 
 Using Guardian Agent requires installation **both on your local machine** (the
 one with your SSH private keys) and on each of the **intermediary machines** you
