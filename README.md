@@ -69,6 +69,7 @@ paper</a> or the detailed [design document](doc/design.md).
 
 <p align="center">
 The Case for Secure Delegation (to appear at ACM HotNets 2017)
+
 <a href="doc/hotnets17.pdf">
 <img src="doc/paper-page1.svg" alt="Paper" width="40%" align="middle" display="block">
 </a>
