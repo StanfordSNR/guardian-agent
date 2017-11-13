@@ -174,7 +174,7 @@ You can also use `sga-ssh` as a drop-in replacement to an ssh client:
 ### Command verification
 
 Command verification requires the server to support the `no-more-sessions`
-extension. This is extension is present on OpenSSH servers, but
+extension. This extension is present on OpenSSH servers, but
 unfortunately not implemented on other SSH servers (including GitHub, which uses `libssh`). When
 executing a command on a server that does not support this extension, only the
 identity of the intermediary and the identity of the server can be constrained and verified by the agent
