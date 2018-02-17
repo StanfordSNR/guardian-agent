@@ -44,3 +44,4 @@ Makefile.in
 /proto/.libs/libguardoproto.la
 /proto/libguardoproto.la
 /guardo.pb.go
+/guardo/guardo.pb.go
