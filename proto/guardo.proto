@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package guardo;
+
+message OpenRequest {
+    string path = 1;
+    int32 flags = 2;
+    uint32 mode = 3;
+}
+
+message UnlinkRequest {
+    string path = 1;
+    int32 flags = 2;
+}
+
+message AccessRequest {
+    string path = 1;
+    uint32 mode = 2;
+}
+
+message ElevationRequest {
+    oneof sycall_request {
+        OpenRequest open = 1;
+        UnlinkRequest unlink = 2;
+        AccessRequest access = 3;
+    }
+}
+
+message ElevationResponse {
+    bool is_result_fd = 1;
+    int32 result = 2;
+}
