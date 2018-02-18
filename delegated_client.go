@@ -53,13 +53,13 @@ func (c *client) connectToAgent() error {
 			ExtensionType: AgentGuardExtensionType,
 		}
 
-		err = WriteControlPacket(sock, MsgAgentCExtension, ssh.Marshal(query))
+		err = WriteControlPacket(sock, MsgNum_AGENTC_EXTENSION, ssh.Marshal(query))
 		if err != nil {
 			continue
 		}
 
 		msgNum, _, err := ReadControlPacket(sock)
-		if err == nil && msgNum == MsgAgentSuccess {
+		if err == nil && msgNum == MsgNum_AGENT_SUCCESS {
 			c.agentConn = sock
 			return nil
 		}
@@ -264,11 +264,11 @@ func getHandoffNextTransportByte(control net.Conn) (uint32, error) {
 	}
 	handoffMsg := new(HandoffCompleteMessage)
 	switch msgNum {
-	case MsgHandoffComplete:
+	case MsgNum_HANDOFF_COMPLETE:
 		if err = ssh.Unmarshal(handoffPacket, handoffMsg); err != nil {
 			return 0, fmt.Errorf("failed to unmarshal MsgHandshakeCompleted: %s", err)
 		}
-	case MsgHandoffFailed:
+	case MsgNum_HANDOFF_FAILED:
 		handoffFailedMsg := new(HandoffFailedMessage)
 		ssh.Unmarshal(handoffPacket, handoffFailedMsg)
 		if debugClient {
@@ -415,7 +415,7 @@ func (c *client) runDelegated() error {
 	}
 
 	execReqPacket := ssh.Marshal(execReq)
-	err = WriteControlPacket(c.agentConn, MsgExecutionRequest, execReqPacket)
+	err = WriteControlPacket(c.agentConn, MsgNum_EXECUTION_REQUEST, execReqPacket)
 	if err != nil {
 		return fmt.Errorf("failed to send MsgExecutionRequest to agent: %s", err)
 	}
@@ -426,9 +426,9 @@ func (c *client) runDelegated() error {
 		return fmt.Errorf("failed to get approval from agent: %s", err)
 	}
 	switch msgNum {
-	case MsgExecutionApproved:
+	case MsgNum_EXECUTION_APPROVED:
 		break
-	case MsgExecutionDenied:
+	case MsgNum_EXECUTION_DENIED:
 		var denyMsg ExecutionDeniedMessage
 		ssh.Unmarshal(msg, &denyMsg)
 		return fmt.Errorf("execution denied by agent: %s", denyMsg.Reason)

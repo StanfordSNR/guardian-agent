@@ -1,6 +1,7 @@
 package guardianagent
 
 import (
+	"crypto/rand"
 	"fmt"
 	"io"
 	"log"
@@ -9,6 +10,9 @@ import (
 	"os/user"
 	"path"
 
+	"github.com/golang/protobuf/proto"
+
+	"github.com/StanfordSNR/guardian-agent/guardo"
 	"github.com/hashicorp/yamux"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
@@ -74,16 +78,16 @@ func (agent *Agent) proxySSH(scope Scope, toClient net.Conn, toServer net.Conn, 
 	done := proxy.Run()
 
 	err = <-done
-	var msgNum byte
+	var msgNum MsgNum
 	var msg interface{}
 	if err != nil {
 		msg = HandoffFailedMessage{Msg: err.Error()}
-		msgNum = MsgHandoffFailed
+		msgNum = MsgNum_HANDOFF_FAILED
 
 	} else {
 		msg = HandoffCompleteMessage{
 			NextTransportByte: uint32(meteredConnToServer.BytesRead() - proxy.BufferedFromServer())}
-		msgNum = MsgHandoffComplete
+		msgNum = MsgNum_HANDOFF_COMPLETE
 	}
 	packet := ssh.Marshal(msg)
 	return WriteControlPacket(control, msgNum, packet)
@@ -101,14 +105,15 @@ func (agent *Agent) HandleConnection(conn net.Conn) error {
 		if err != nil {
 			return fmt.Errorf("Failed to read control packet: %s", err)
 		}
+		log.Printf("Got msgNum: %d", msgNum)
 		switch msgNum {
-		case MsgAgentForwardingNotice:
+		case MsgNum_AGENT_FORWARDING_NOTICE:
 			notice := new(AgentForwardingNoticeMsg)
 			if err := ssh.Unmarshal(payload, notice); err != nil {
 				return fmt.Errorf("Failed to unmarshal AgentForwardingNoticeMsg: %s", err)
 			}
 			scope.Client = notice.Client
-		case MsgExecutionRequest:
+		case MsgNum_EXECUTION_REQUEST:
 			execReq := new(ExecutionRequestMessage)
 			if err = ssh.Unmarshal(payload, execReq); err != nil {
 				return fmt.Errorf("Failed to unmarshal ExecutionRequestMessage: %s", err)
@@ -116,30 +121,37 @@ func (agent *Agent) HandleConnection(conn net.Conn) error {
 			scope.ServiceHostname = execReq.Server
 			scope.ServiceUsername = execReq.User
 			agent.handleExecutionRequest(conn, scope, execReq.Command)
-		case MsgAgentCExtension:
+		case MsgNum_CREDENTIAL_REQUEST:
+			credReq := new(guardo.CredentialRequest)
+			if err = proto.Unmarshal(payload, credReq); err != nil {
+				return fmt.Errorf("Failed to unmarshal CredentialRequest: %s", err)
+			}
+			log.Printf("Got credential request: %v", credReq)
+			agent.handleCredentialRequest(conn, scope, credReq)
+		case MsgNum_AGENTC_EXTENSION:
 			queryExtension := new(AgentCExtensionMsg)
 			ssh.Unmarshal(payload, queryExtension)
 			if queryExtension.ExtensionType == AgentGuardExtensionType {
-				WriteControlPacket(conn, MsgAgentSuccess, []byte{})
+				WriteControlPacket(conn, MsgNum_AGENT_SUCCESS, []byte{})
 				continue
 			}
 			fallthrough
 		default:
-			WriteControlPacket(conn, MsgAgentFailure, []byte{})
+			WriteControlPacket(conn, MsgNum_AGENT_FAILURE, []byte{})
 			return fmt.Errorf("Unrecognized incoming message: %d", msgNum)
 		}
 	}
 }
 
-func (ag *Agent) handleExecutionRequest(conn net.Conn, scope Scope, cmd string) error {
-	err := ag.policy.RequestApproval(scope, cmd)
+func (agent *Agent) handleExecutionRequest(conn net.Conn, scope Scope, cmd string) error {
+	err := agent.policy.RequestApproval(scope, cmd)
 	if err != nil {
-		WriteControlPacket(conn, MsgExecutionDenied,
+		WriteControlPacket(conn, MsgNum_EXECUTION_DENIED,
 			ssh.Marshal(ExecutionDeniedMessage{Reason: err.Error()}))
 		return nil
 	}
-	filter := ssh.NewFilter(cmd, func() error { return ag.policy.RequestApprovalForAllCommands(scope) })
-	WriteControlPacket(conn, MsgExecutionApproved, []byte{})
+	filter := ssh.NewFilter(cmd, func() error { return agent.policy.RequestApprovalForAllCommands(scope) })
+	WriteControlPacket(conn, MsgNum_EXECUTION_APPROVED, []byte{})
 
 	ymux, err := yamux.Server(conn, nil)
 	if err != nil {
@@ -165,7 +177,7 @@ func (ag *Agent) handleExecutionRequest(conn net.Conn, scope Scope, cmd string) 
 	}
 	defer transport.Close()
 
-	err = ag.proxySSH(scope, sshData, transport, control, filter)
+	err = agent.proxySSH(scope, sshData, transport, control, filter)
 	transport.Close()
 	sshData.Close()
 	control.Close()
@@ -176,4 +188,56 @@ func (ag *Agent) handleExecutionRequest(conn net.Conn, scope Scope, cmd string) 
 
 	return nil
 
+}
+
+func (agent *Agent) handleCredentialRequest(conn net.Conn, scope Scope, req *guardo.CredentialRequest) error {
+	resp := agent.buildCredentialResponse(scope, req)
+	log.Printf("Credential Response: %v", resp)
+	bytes, err := proto.Marshal(resp)
+	if err != nil {
+		log.Printf("Failed to marshal credential response: %s, %v", err, resp)
+	}
+	WriteControlPacket(conn, MsgNum_CREDENTIAL_RESPONSE, bytes)
+	return nil
+}
+
+func (agent *Agent) buildCredentialResponse(scope Scope, req *guardo.CredentialRequest) *guardo.CredentiallResponse {
+	resp := &guardo.CredentiallResponse{}
+	err := agent.policy.RequestCredential(scope, req)
+	if err != nil {
+		resp.Status = guardo.CredentiallResponse_DENIED
+		return resp
+	}
+	resp.Credential = &guardo.Credential{Op: req.GetOp()}
+	err = agent.signCredential(resp.Credential)
+	if err != nil {
+		resp.Status = guardo.CredentiallResponse_ERROR
+		return resp
+	}
+
+	resp.Status = guardo.CredentiallResponse_APPROVED
+	return resp
+}
+
+func (agent *Agent) signCredential(cred *guardo.Credential) error {
+	curuser, err := user.Current()
+	if err != nil {
+		return fmt.Errorf("Failed to get current user: %s", err)
+	}
+	signers := getSigners(curuser.HomeDir, agent.policy.UI)
+	signer := signers[0]
+	nonce := make([]byte, 32)
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return err
+	}
+	cred.SignerNonce = nonce
+	cred.SignatureKey = signer.PublicKey().Marshal()
+
+	sig, err := signer.Sign(rand.Reader, []byte(cred.String()))
+	if err != nil {
+		return err
+	}
+	cred.Signature = sig.Blob
+	cred.SignatureFormat = sig.Format
+	return nil
 }

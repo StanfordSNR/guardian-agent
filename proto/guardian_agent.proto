@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package guardian_agent;
+
+option go_package = "guardianagent";
+
+enum MsgNum {
+    UNKNOWN = 0;
+
+    AGENT_FAILURE = 5;
+    AGENT_SUCCESS = 6;
+   
+    AGENTC_EXTENSION = 27;
+
+    EXECUTION_REQUEST = 101;
+    EXECUTION_DENIED = 102;
+    EXECUTION_APPROVED = 103;
+    HANDOFF_COMPLETE = 104;
+    HANDOFF_FAILED = 105;
+
+   // Guardo
+    CREDENTIAL_REQUEST = 106;
+    CREDENTIAL_RESPONSE = 107;
+    ELEVATION_REQUEST = 108;
+    ELEVATION_RESPONSE = 109;
+
+    AGENT_FORWARDING_NOTICE = 206;
+}

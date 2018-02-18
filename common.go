@@ -23,36 +23,22 @@ import (
 
 var Version string
 
-const debugCommon = false
+const debugCommon = true
 
 const AgentGuardExtensionType = "agent-guard@cs.stanford.edu"
 
 const AgentGuardSockName = ".agent-guard-sock"
 
-const MsgAgentSuccess = 6
-
-const MsgAgentFailure = 5
-
 type AgentFailureMsg struct{}
-
-const MsgAgentCExtension = 27
 
 type AgentCExtensionMsg struct {
 	ExtensionType string
 	Contents      []byte
 }
 
-const MsgAgentForwardingNotice = 206
-
 type AgentForwardingNoticeMsg struct {
 	Client string
 }
-
-const MsgExecutionRequest = 1
-const MsgExecutionDenied = 2
-const MsgExecutionApproved = 3
-const MsgHandoffComplete = 10
-const MsgHandoffFailed = 11
 
 const MaxAgentPacketSize = 10 * 1024
 
@@ -111,7 +97,7 @@ func (cc *CustomConn) Write(b []byte) (n int, err error) {
 	return
 }
 
-func ReadControlPacket(r io.Reader) (msgNum byte, payload []byte, err error) {
+func ReadControlPacket(r io.Reader) (msgNum MsgNum, payload []byte, err error) {
 	var packetLenBytes [4]byte
 	_, err = io.ReadFull(r, packetLenBytes[:])
 	if err != nil {
@@ -127,13 +113,13 @@ func ReadControlPacket(r io.Reader) (msgNum byte, payload []byte, err error) {
 		log.Printf("read: %s", hex.EncodeToString(payload[:]))
 	}
 
-	return payload[0], payload[1:], err
+	return MsgNum(payload[0]), payload[1:], err
 }
 
-func WriteControlPacket(w io.Writer, msgNum byte, payload []byte) error {
+func WriteControlPacket(w io.Writer, msgNum MsgNum, payload []byte) error {
 	var packetHeader [5]byte
 	binary.BigEndian.PutUint32(packetHeader[:], uint32(len(payload)+1))
-	packetHeader[4] = msgNum
+	packetHeader[4] = byte(msgNum)
 	if debugCommon {
 		log.Printf("written len: %d", len(payload)+1)
 	}
@@ -301,6 +287,10 @@ func getAuth(username string, host string, homeDir string, ui UI) []ssh.AuthMeth
 	passwordAuthMethod := ssh.PasswordCallback(func() (string, error) {
 		return ui.AskPassword(fmt.Sprintf("%s@%s password:", username, host))
 	})
+	return []ssh.AuthMethod{ssh.PublicKeys(getSigners(homeDir, ui)...), passwordAuthMethod}
+}
+
+func getSigners(homeDir string, ui UI) []ssh.Signer {
 	realAgentPath := os.Getenv("SSH_AUTH_SOCK")
 	if realAgentPath != "" {
 		realAgent, err := net.Dial("unix", realAgentPath)
@@ -308,9 +298,9 @@ func getAuth(username string, host string, homeDir string, ui UI) []ssh.AuthMeth
 			agentClient := agent.NewClient(realAgent)
 			agentKeys, err := agentClient.List()
 			if err == nil && len(agentKeys) > 0 {
-				return []ssh.AuthMethod{
-					ssh.PublicKeysCallback(agentClient.Signers),
-					passwordAuthMethod,
+				signers, err := agentClient.Signers()
+				if err == nil {
+					return signers
 				}
 			}
 		}
@@ -329,5 +319,5 @@ func getAuth(username string, host string, homeDir string, ui UI) []ssh.AuthMeth
 		}
 		signers = append(signers, signer)
 	}
-	return []ssh.AuthMethod{ssh.PublicKeys(signers...), passwordAuthMethod}
+	return signers
 }

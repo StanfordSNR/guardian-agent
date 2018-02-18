@@ -71,6 +71,20 @@ string FileDescriptor::read( const size_t limit )
   return string( buffer, bytes_read );
 }
 
+string FileDescriptor::read_full(const size_t num_bytes)
+{
+  string buffer;
+  while (buffer.size() < num_bytes)
+  {
+    if (eof())
+    {
+      throw runtime_error( "insufficient data" );
+    }
+    buffer += read(num_bytes - buffer.size());
+  }
+  return buffer;
+}
+
 /* write method */
 string::const_iterator FileDescriptor::write( const std::string & buffer, const bool write_all )
 {

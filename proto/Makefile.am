@@ -1,4 +1,4 @@
-source = guardo.proto
+source = guardo.proto guardian_agent.proto
 
 SUFFIXES = .proto .pb.cc
 
@@ -6,7 +6,7 @@ AM_CPPFLAGS = $(CXX17_FLAGS) -shared -fPIC
 AM_CXXFLAGS = $(PICKY_CXXFLAGS)
 
 .proto.pb.cc:
-	$(PROTOC) --cpp_out=$(builddir) --go_out=$(top_builddir)/guardo -I$(srcdir) $<
+	$(PROTOC) --cpp_out=$(builddir) --go_out=$(top_builddir) -I$(srcdir) $<
 
 noinst_LTLIBRARIES = libguardoproto.la
 dist_noinst_DATA = guardo.proto	

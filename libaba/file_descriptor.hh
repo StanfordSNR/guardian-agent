@@ -44,6 +44,8 @@ public:
   std::string read( const size_t limit = BUFFER_SIZE );
   std::string::const_iterator write( const std::string & buffer, const bool write_all = true );
 
+  std::string read_full( const size_t num_bytes );
+
   /* forbid copying FileDescriptor objects or assigning them */
   FileDescriptor( const FileDescriptor & other ) = delete;
   const FileDescriptor & operator=( const FileDescriptor & other ) = delete;

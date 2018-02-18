@@ -158,7 +158,7 @@ func (fwd *SSHFwd) Accept() (net.Conn, error) {
 	}()
 	go func() {
 		msg := AgentForwardingNoticeMsg{Client: fwd.RemoteReadableName}
-		if err = WriteControlPacket(clientPipe, MsgAgentForwardingNotice, ssh.Marshal(msg)); err != nil {
+		if err = WriteControlPacket(clientPipe, MsgNum_AGENT_FORWARDING_NOTICE, ssh.Marshal(msg)); err != nil {
 			log.Printf("Failed to send message to agent: %s", err)
 			return
 		}

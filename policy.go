@@ -3,11 +3,38 @@ package guardianagent
 import (
 	"errors"
 	"fmt"
+
+	"github.com/StanfordSNR/guardian-agent/guardo"
 )
 
 type Policy struct {
 	Store *Store
 	UI    UI
+}
+
+func (policy *Policy) RequestCredential(scope Scope, req *guardo.CredentialRequest) error {
+	question := fmt.Sprintf("Allow %s to call '%s' as root?",
+		scope.Client, req.GetOp())
+
+	prompt := Prompt{
+		Question: question,
+		Choices:  []string{"Disallow", "Allow once"},
+	}
+	resp, err := policy.UI.Ask(prompt)
+	if err != nil {
+		return fmt.Errorf("Failed to get user approval: %s", err)
+	}
+	switch resp {
+	case 2:
+		policy.UI.Inform(fmt.Sprintf("Request by %s to call '%s' as root APPROVED by user",
+			scope.Client, req.GetOp()))
+		err = nil
+	default:
+		policy.UI.Inform(fmt.Sprintf("Request by %s to call '%s' as root DENIED by user",
+			scope.Client, req.GetOp()))
+		err = errors.New("User rejected client request")
+	}
+	return err
 }
 
 func (policy *Policy) RequestApproval(scope Scope, cmd string) error {

@@ -2,28 +2,57 @@ syntax = "proto3";
 
 package guardo;
 
-message OpenRequest {
+option go_package = "./guardo;guardo";
+
+message OpenOp {
     string path = 1;
     int32 flags = 2;
     uint32 mode = 3;
 }
 
-message UnlinkRequest {
+message UnlinkOp {
     string path = 1;
     int32 flags = 2;
 }
 
-message AccessRequest {
+message AccessOp {
     string path = 1;
     uint32 mode = 2;
 }
 
-message ElevationRequest {
-    oneof sycall_request {
-        OpenRequest open = 1;
-        UnlinkRequest unlink = 2;
-        AccessRequest access = 3;
+message Operation {
+    oneof op {
+        OpenOp open = 1;
+        UnlinkOp unlink = 2;
+        AccessOp access = 3;
     }
+}
+
+message CredentialRequest {
+    Operation op = 1;
+}
+
+message Credential {
+    bytes signer_nonce = 1;
+    Operation op = 2;
+    string signature_format = 3;
+    bytes signature_key = 4;
+    bytes signature = 5;
+}
+
+message CredentiallResponse {
+    enum Status {
+        APPROVED = 0;
+        DENIED = 1;
+        ERROR = 2;
+    }
+    Status status = 1;
+    Credential credential = 2;
+}
+
+message ElevationRequest {
+    Operation op = 1;
+    Credential credential = 2;
 }
 
 message ElevationResponse {
