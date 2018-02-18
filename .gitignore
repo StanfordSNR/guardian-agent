@@ -10,7 +10,6 @@
 .vscode/
 *.a
 *.o
-guardo-agent
 Makefile
 Makefile.in
 /aclocal.m4

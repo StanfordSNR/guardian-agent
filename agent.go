@@ -233,7 +233,11 @@ func (agent *Agent) signCredential(cred *guardo.Credential) error {
 	cred.SignerNonce = nonce
 	cred.SignatureKey = signer.PublicKey().Marshal()
 
-	sig, err := signer.Sign(rand.Reader, []byte(cred.String()))
+	bytes_to_sign, err := proto.Marshal(cred)
+	if err != nil {
+		return err
+	}
+	sig, err := signer.Sign(rand.Reader, bytes_to_sign)
 	if err != nil {
 		return err
 	}

@@ -23,7 +23,7 @@ import (
 
 var Version string
 
-const debugCommon = true
+const debugCommon = false
 
 const AgentGuardExtensionType = "agent-guard@cs.stanford.edu"
 
