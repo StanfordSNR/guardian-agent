@@ -16,6 +16,7 @@ import (
 	"path"
 	"strings"
 
+	flags "github.com/jessevdk/go-flags"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
@@ -172,6 +173,35 @@ type CommonOptions struct {
 	LogFile string `long:"log" description:"log file"`
 
 	Version bool `long:"version" short:"V" description:"Display the version number and exit"`
+}
+
+func (opts *CommonOptions) GetVersion() bool {
+	return opts.Version
+}
+
+type Options interface {
+	GetVersion() bool
+}
+
+func ParseCommandLineOrDie(parser *flags.Parser, opts Options) {
+	_, err := parser.Parse()
+	if opts.GetVersion() {
+		fmt.Println(Version)
+		os.Exit(0)
+	}
+
+	if err != nil {
+		if flagsErr, ok := err.(*flags.Error); ok {
+			if flagsErr.Type == flags.ErrHelp {
+				fmt.Println(flagsErr.Message)
+				os.Exit(0)
+			}
+			fmt.Fprintln(os.Stderr, flagsErr.Message)
+			os.Exit(255)
+		}
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		os.Exit(255)
+	}
 }
 
 // Adapted from https://github.com/coreos/fleet/blob/master/ssh/known_hosts.go

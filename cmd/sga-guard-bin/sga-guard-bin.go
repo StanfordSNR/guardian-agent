@@ -34,6 +34,7 @@ type options struct {
 }
 
 func main() {
+	var err error
 	var opts options
 	var parser = flags.NewParser(&opts, flags.HelpFlag|flags.PassDoubleDash)
 	var sshOptions []string
@@ -52,25 +53,7 @@ func main() {
 		return args, nil
 	}
 
-	_, err := parser.Parse()
-
-	if opts.Version {
-		fmt.Println(guardianagent.Version)
-		os.Exit(0)
-	}
-
-	if err != nil {
-		if flagsErr, ok := err.(*flags.Error); ok {
-			if flagsErr.Type == flags.ErrHelp {
-				fmt.Println(flagsErr.Message)
-				os.Exit(0)
-			}
-			fmt.Fprintln(os.Stderr, flagsErr.Message)
-			os.Exit(255)
-		}
-		fmt.Fprintf(os.Stderr, "%s\n", err)
-		os.Exit(255)
-	}
+	guardianagent.ParseCommandLineOrDie(parser, &opts)
 
 	readableName := opts.SSHCommand.UserHost
 	if parser.FindOptionByShortName('l').IsSet() {

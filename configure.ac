@@ -12,6 +12,8 @@ LT_INIT(dlopen)
 # Add picky CXXFLAGS
 CXX17_FLAGS="-std=c++17 -pthread -fPIC"
 PICKY_CXXFLAGS="-pedantic -Wall -Wextra -Werror"
+AC_SUBST(ARFLAGS, "cr")
+AC_SUBST(AR_FLAGS, "cr")
 AC_SUBST([CXX17_FLAGS])
 AC_SUBST([PICKY_CXXFLAGS])
 

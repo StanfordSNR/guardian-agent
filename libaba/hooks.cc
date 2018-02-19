@@ -86,7 +86,6 @@ bool get_credential(const guardo::Operation& op, guardo::Credential* credential)
     *request.mutable_op() = op;
     socket.write(create_raw_msg(guardian_agent::CREDENTIAL_REQUEST, request), true);
 
-    std::cerr << "Sent credential request: " << request.DebugString() << std::endl;
     std::string packet_len_buf = socket.read_full(sizeof(int));
     int packet_len = ntohl(*(int*)packet_len_buf.data());
     std::string packet = socket.read_full(packet_len);
@@ -102,7 +101,6 @@ bool get_credential(const guardo::Operation& op, guardo::Credential* credential)
         return false;
     }
 
-    std::cerr << "Got credential response " << guardo::CredentiallResponse_Status_Name(response.status()) << std::endl;
     *credential = response.credential();
     return true;
 }
@@ -136,7 +134,7 @@ static void hook(long syscall_number,
             op.mutable_access()->set_mode(arg1);
             break;
         default:
-            printf("Error: unexpected intercepted syscall: %ld\n", syscall_number);
+            std::cerr << "Error: unexpected intercepted syscall: " << syscall_number << std::endl;
             return;
     }
 
@@ -155,28 +153,28 @@ static void hook(long syscall_number,
 
     std::vector<int> fds;
     std::string response_data = socket.recvmsg(&fds);
-    size_t payload_size = *(int*)response_data.data();
+    size_t payload_size = ntohl(*(int*)response_data.data());
     if (response_data.size() != (sizeof(int) + payload_size)) 
     {
-        printf("Got unexpected data size: %lu, payload size: %lu\n", 
-               response_data.size(), payload_size);
+        std::cerr << "Error: enexpected data size: " << response_data.size()  
+            << " payload size: " << payload_size << std::endl;
     }
     unsigned char msg_num = *(response_data.data() + 4);
     if (msg_num != guardian_agent::ELEVATION_RESPONSE) 
     {
-        printf("Got unexpected message num: %d\n", msg_num);
+        std::cerr << "Error: got unexpected message num: " << msg_num << std::endl;
     }
     guardo::ElevationResponse response;
     if (!response.ParseFromString(response_data.data() + sizeof(int) + 1)) 
     {
-        printf("Failed to parse ElevationResponse\n");
+        std::cerr << "Error: failed to parse ElevationResponse" << std::endl;
         return;
     }
     if (response.is_result_fd())
     {
         if (fds.size() == 0) 
         {
-            printf("Error: no file descriptor with approval\n");
+            std::cerr << "Error: no file descriptor with approval" << std::endl;
             return;
         }
         *result = fds[0];

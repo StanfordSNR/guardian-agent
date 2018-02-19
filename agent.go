@@ -192,7 +192,6 @@ func (agent *Agent) handleExecutionRequest(conn net.Conn, scope Scope, cmd strin
 
 func (agent *Agent) handleCredentialRequest(conn net.Conn, scope Scope, req *guardo.CredentialRequest) error {
 	resp := agent.buildCredentialResponse(scope, req)
-	log.Printf("Credential Response: %v", resp)
 	bytes, err := proto.Marshal(resp)
 	if err != nil {
 		log.Printf("Failed to marshal credential response: %s, %v", err, resp)

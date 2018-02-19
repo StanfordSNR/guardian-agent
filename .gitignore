@@ -36,9 +36,9 @@ Makefile.in
 /libhooks.so
 /libtool
 /ltmain.sh
-/proto/guardo.pb.cc
-/proto/guardo.pb.h
-/proto/guardo.pb.lo
+/proto/*.pb.cc
+/proto/*.pb.h
+/proto/*.pb.lo
 /m4/*.m4
 /proto/.libs/libguardoproto.la
 /proto/libguardoproto.la
