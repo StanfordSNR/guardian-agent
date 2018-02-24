@@ -57,6 +57,25 @@ void create_unlink_op(int parent_fd,
     unlink_op->set_flags(flags);
 }
 
+bool create_access_op(const char* path, 
+                      int flags,
+                      AccessOp* access_op) 
+{
+    // Don't try to elevate executable access checks for files that
+    // are not executable at all. 
+    if (flags == X_OK) {
+        auto p = fs::status(path).permissions();
+        if (((p & fs::perms::owner_exec) == fs::perms::none) &&
+            ((p & fs::perms::group_exec) == fs::perms::none) &&
+            ((p & fs::perms::others_exec) == fs::perms::none)) {
+            return false;
+        }
+    }
+    access_op->set_path(relative_to_absolute_path(AT_FDCWD, path));
+    access_op->set_mode(flags);
+    return true;
+}
+
 fs::path user_runtime_dir()
 {
     const char* dir = std::getenv("XDG_RUNTIME_DIR");
@@ -145,18 +164,8 @@ static void hook(long syscall_number,
                  __attribute__((unused)) long arg5,
                 long int* result)
 {
-    UnixSocket socket;
-    socket.connect(Address::NewUnixAddress(fs::path("/tmp") / GUARDO_SOCK_NAME));    
-
-    ChallengeRequest challenge_req;
-    socket.write(create_raw_msg(CHALLENGE_REQUEST, challenge_req), true);
-    Challenge challenge;
-    if (!read_expected_msg(&socket, CHALLENGE_RESPONSE, &challenge)) {
-        std::cerr << "Failed to get challenge" << std::endl;
-        return;
-    }
-
     Operation op;
+    bool should_hook = true;
     switch (syscall_number) {
 	// Must be in sync with switch statement in 'safe_hook' below.
         case SYS_open: 
@@ -172,12 +181,26 @@ static void hook(long syscall_number,
             create_unlink_op((int)arg0, (char*)arg1, arg2, op.mutable_unlink());
             break;
         case SYS_access:
-            op.mutable_access()->set_path(relative_to_absolute_path(AT_FDCWD, (char*)arg0));
-            op.mutable_access()->set_mode(arg1);
+            should_hook = create_access_op((char*)arg0, (int)arg1, op.mutable_access());
             break;
         default:
             std::cerr << "Error: unexpected intercepted syscall: " << syscall_number << std::endl;
             return;
+    }
+
+    if (!should_hook) {
+        return;
+    }
+
+    UnixSocket socket;
+    socket.connect(Address::NewUnixAddress(fs::path("/tmp") / GUARDO_SOCK_NAME));    
+
+    ChallengeRequest challenge_req;
+    socket.write(create_raw_msg(CHALLENGE_REQUEST, challenge_req), true);
+    Challenge challenge;
+    if (!read_expected_msg(&socket, CHALLENGE_RESPONSE, &challenge)) {
+        std::cerr << "Failed to get challenge" << std::endl;
+        return;
     }
 
     Credential credential;
