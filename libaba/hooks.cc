@@ -16,6 +16,8 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+namespace guardian_agent {
+
 namespace fs = std::experimental::filesystem;
 
 static const char* AGENT_GUARD_SOCK_NAME = ".agent-guard-sock";
@@ -23,16 +25,13 @@ static const char* GUARDO_SOCK_NAME = ".guardo-sock";
 
 std::string relative_to_absolute_path(int parent_fd, const fs::path& path)
 {
-    if (!path.is_relative())
-    {
+    if (!path.is_relative()){
         return path;
     }
     fs::path base_dir;
-    if (parent_fd == AT_FDCWD) 
-    {
+    if (parent_fd == AT_FDCWD) {
         base_dir = fs::current_path();
-    } else 
-    {
+    } else {
         base_dir = fs::read_symlink(fs::path("/proc/self/fd") / std::to_string(parent_fd));
     } 
     return base_dir / path;
@@ -42,7 +41,7 @@ void create_open_op(int parent_fd,
                     const char* path, 
                     int flags,
                     int mode,
-                    guardo::OpenOp* open_op) 
+                    OpenOp* open_op) 
 {
     open_op->set_path(relative_to_absolute_path(parent_fd, path));        
     open_op->set_flags(flags);
@@ -52,7 +51,7 @@ void create_open_op(int parent_fd,
 void create_unlink_op(int parent_fd, 
                       const char* path, 
                       int flags,
-                      guardo::UnlinkOp* unlink_op) 
+                      UnlinkOp* unlink_op) 
 {
     unlink_op->set_path(relative_to_absolute_path(parent_fd, path));
     unlink_op->set_flags(flags);
@@ -61,8 +60,7 @@ void create_unlink_op(int parent_fd,
 fs::path user_runtime_dir()
 {
     const char* dir = std::getenv("XDG_RUNTIME_DIR");
-    if (dir == NULL) 
-    {
+    if (dir == NULL) {
         dir = std::getenv("HOME");
     }
     return fs::path(std::string(dir));
@@ -71,33 +69,66 @@ fs::path user_runtime_dir()
 std::string create_raw_msg(unsigned char msg_num, const google::protobuf::MessageLite& msg)
 {
     std::string raw_msg(5, '\0');
-    *(unsigned char*)(raw_msg.data() + 4) = msg_num;
+    *(unsigned char*)(raw_msg.data() + sizeof(int)) = msg_num;
     msg.AppendToString(&raw_msg);
-    *(int*)raw_msg.data() = htonl(raw_msg.size() - 4);
+    *(int*)raw_msg.data() = htonl(raw_msg.size() - sizeof(int));
     return raw_msg;    
 }
 
-bool get_credential(const guardo::Operation& op, guardo::Credential* credential) 
+bool read_expected_msg(FileDescriptor* fd, const unsigned char expected_msg_num, google::protobuf::MessageLite* msg) 
+{
+    std::string packet_len_buf = fd->read_full(sizeof(int));
+    int packet_len = ntohl(*(int*)packet_len_buf.data());
+    std::string packet = fd->read_full(packet_len);
+    if (packet[0] != expected_msg_num) {
+        std::cerr << "Invalid msg_num, expected: " << expected_msg_num << ", got: " << packet[0] << std::endl;
+        return false;
+    }
+    if (!msg->ParseFromString(packet.substr(1))) {
+        std::cerr << "Failed to parse msg " << expected_msg_num << " from string" << std::endl;
+        return false;
+    }
+    return true;
+}
+
+bool read_expected_msg_with_fd(UnixSocket* socket, const unsigned char expected_msg_num, google::protobuf::MessageLite* msg, std::vector<int>* fds) 
+{
+    std::string response_data = socket->recvmsg(fds);
+    int payload_size = ntohl(*(int*)response_data.data());
+    if (response_data.size() != (sizeof(int) + payload_size)) {
+        std::cerr << "Error: enexpected data size: " << response_data.size()  
+            << " payload size: " << payload_size << std::endl;
+        return false;
+    }
+    unsigned char msg_num = *(response_data.data() + sizeof(payload_size));
+    if (msg_num != expected_msg_num) {
+        std::cerr << "Invalid msg_num, expected: " << expected_msg_num << ", got: " << msg_num << std::endl;
+        return false;
+    }
+    if (!msg->ParseFromString(response_data.data() + sizeof(payload_size) + sizeof(msg_num))) {
+        std::cerr << "Error: failed to parse msg:" << msg_num << std::endl;
+        return false;
+    }
+    return true;
+}
+
+bool get_credential(const Operation& op, const Challenge& challenge, Credential* credential) 
 {
     UnixSocket socket;
     socket.connect(Address::NewUnixAddress(user_runtime_dir() / AGENT_GUARD_SOCK_NAME));
 
-    guardo::CredentialRequest request;
+    CredentialRequest request;
     *request.mutable_op() = op;
-    socket.write(create_raw_msg(guardian_agent::CREDENTIAL_REQUEST, request), true);
+    *request.mutable_challenge() = challenge;
+    socket.write(create_raw_msg(CREDENTIAL_REQUEST, request), true);
 
-    std::string packet_len_buf = socket.read_full(sizeof(int));
-    int packet_len = ntohl(*(int*)packet_len_buf.data());
-    std::string packet = socket.read_full(packet_len);
-    guardo::CredentiallResponse response;
-    if (!response.ParseFromString(packet.substr(1))) 
-    {
-        std::cerr << "Failed to parse CredentialResponse from string" << std::endl;
+    CredentialResponse response;
+    if (!read_expected_msg(&socket, CREDENTIAL_RESPONSE, &response)) {
+        std::cerr << "Failed to read CredentialResponse" << std::endl;
         return false;
     }
-    if (response.status() != guardo::CredentiallResponse_Status_APPROVED) 
-    {
-        std::cerr << "Credential request not approved: " << guardo::CredentiallResponse_Status_Name(response.status()) << std::endl;
+    if (response.status() != CredentialResponse_Status_APPROVED) {
+        std::cerr << "Credential request not approved: " << CredentialResponse_Status_Name(response.status()) << std::endl;
         return false;
     }
 
@@ -114,9 +145,19 @@ static void hook(long syscall_number,
                  __attribute__((unused)) long arg5,
                 long int* result)
 {
-    guardo::Operation op;
-    switch (syscall_number) 
-    {
+    UnixSocket socket;
+    socket.connect(Address::NewUnixAddress(fs::path("/tmp") / GUARDO_SOCK_NAME));    
+
+    ChallengeRequest challenge_req;
+    socket.write(create_raw_msg(CHALLENGE_REQUEST, challenge_req), true);
+    Challenge challenge;
+    if (!read_expected_msg(&socket, CHALLENGE_RESPONSE, &challenge)) {
+        std::cerr << "Failed to get challenge" << std::endl;
+        return;
+    }
+
+    Operation op;
+    switch (syscall_number) {
         case SYS_open: 
             create_open_op(AT_FDCWD, (char*)arg0, arg1, arg2, op.mutable_open());
             break;
@@ -138,49 +179,31 @@ static void hook(long syscall_number,
             return;
     }
 
-    guardo::ElevationRequest elevation_request;
-    *elevation_request.mutable_op() = op;
-
-    if (!get_credential(op, elevation_request.mutable_credential()))
-    {
+    Credential credential;
+    if (!get_credential(op, challenge, &credential)) {
         return;
     }
 
-    UnixSocket socket;
-    socket.connect(Address::NewUnixAddress(fs::path("/tmp") / GUARDO_SOCK_NAME));    
-
-    socket.write(create_raw_msg(guardian_agent::ELEVATION_REQUEST, elevation_request), true);
+    ElevationRequest elevation_request;
+    *elevation_request.mutable_op() = op;
+    *elevation_request.mutable_credential() = credential;
+    socket.write(create_raw_msg(ELEVATION_REQUEST, elevation_request), true);
 
     std::vector<int> fds;
-    std::string response_data = socket.recvmsg(&fds);
-    size_t payload_size = ntohl(*(int*)response_data.data());
-    if (response_data.size() != (sizeof(int) + payload_size)) 
-    {
-        std::cerr << "Error: enexpected data size: " << response_data.size()  
-            << " payload size: " << payload_size << std::endl;
-    }
-    unsigned char msg_num = *(response_data.data() + 4);
-    if (msg_num != guardian_agent::ELEVATION_RESPONSE) 
-    {
-        std::cerr << "Error: got unexpected message num: " << msg_num << std::endl;
-    }
-    guardo::ElevationResponse response;
-    if (!response.ParseFromString(response_data.data() + sizeof(int) + 1)) 
-    {
-        std::cerr << "Error: failed to parse ElevationResponse" << std::endl;
+    ElevationResponse elevation_response;
+    if (!read_expected_msg_with_fd(&socket, ELEVATION_RESPONSE, &elevation_response, &fds)) {
         return;
     }
-    if (response.is_result_fd())
-    {
+
+    if (elevation_response.is_result_fd()) {
         if (fds.size() == 0) 
         {
             std::cerr << "Error: no file descriptor with approval" << std::endl;
             return;
         }
         *result = fds[0];
-    } else 
-    {
-        *result = response.result();
+    } else {
+        *result = elevation_response.result();
     }
     return;
 }
@@ -197,13 +220,11 @@ static int safe_hook(long syscall_number,
 {
     long real_result = syscall_no_intercept(syscall_number, arg0, arg1, arg2, arg3, arg4, arg5);
     *result = real_result;
-    if (real_result != -EACCES) 
-    {
+    if (real_result != -EACCES) {
         return 0;
     }
 
-    try 
-    {
+    try {
         hook(syscall_number, arg0, arg1, arg2, arg3, arg4, arg5, result);
     } catch ( const std::exception & e ) { /* don't throw from hook */
         print_exception( e );
@@ -213,9 +234,11 @@ static int safe_hook(long syscall_number,
     return 0;
 }
 
+} // namespace guardian_agent
+
 static __attribute__((constructor)) void
 init(void)
 {
 	// Set up the callback function
-	intercept_hook_point = safe_hook;
+	intercept_hook_point = guardian_agent::safe_hook;
 }

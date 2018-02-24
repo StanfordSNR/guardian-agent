@@ -1,13 +1,10 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
-	"os/exec"
 	"os/user"
 	"strconv"
 	"strings"
@@ -28,7 +25,9 @@ type SSHCommand struct {
 type options struct {
 	guardianagent.CommonOptions
 
-	Port int `short:"p" long:"port" description:"Port to connect to on the intermediary host" default:"22"`
+	Username string `short:"l" description:"Specifies the user to log in as on the remote machine"`
+
+	Port uint32 `short:"p" long:"port" description:"Port to connect to on the intermediary host" default:"22"`
 
 	StdinNull bool `short:"n" description:"Redirects stdin from /dev/null"`
 
@@ -46,8 +45,8 @@ type options struct {
 }
 
 func main() {
-	var opts options
-	parser := flags.NewParser(opts, flags.HelpFlag|flags.PassDoubleDash)
+	opts := options{}
+	parser := flags.NewParser(&opts, flags.HelpFlag|flags.PassDoubleDash)
 	parser.UnknownOptionHandler = func(option string, arg flags.SplitArgument, args []string) ([]string, error) {
 		fmt.Fprintf(os.Stderr, "Unknown option: %s\n", option)
 		return args, nil
@@ -111,7 +110,7 @@ func main() {
 	}
 
 	proxyCommand = strings.Replace(proxyCommand, "%h", host, -1)
-	proxyCommand = strings.Replace(proxyCommand, "%p", strconv.Itoa(opts.Port), -1)
+	proxyCommand = strings.Replace(proxyCommand, "%p", strconv.FormatUint(uint64(opts.Port), 10), -1)
 	proxyCommand = strings.Replace(proxyCommand, "%r", opts.Username, -1)
 
 	sshCmd := guardianagent.SSHCommand{
@@ -138,8 +137,8 @@ func main() {
 
 }
 
-func resolveRemote(parser *flags.Parser, opts *options, userAndHost string) (host string, port int, username string) {
-	sshCommandLine := []string{"-G", userAndHost}
+func resolveRemote(parser *flags.Parser, opts *options, userAndHost string) (host string, port uint32, username string) {
+	sshCommandLine := []string{userAndHost}
 	if !parser.FindOptionByLongName("port").IsSetDefault() {
 		sshCommandLine = append(sshCommandLine, fmt.Sprintf("-p %d", opts.Port))
 	}
@@ -147,28 +146,15 @@ func resolveRemote(parser *flags.Parser, opts *options, userAndHost string) (hos
 		sshCommandLine = append(sshCommandLine, "-l", opts.Username)
 	}
 
-	sshChild := exec.Command("ssh", sshCommandLine...)
-	output, err := sshChild.Output()
+	host, port, username, err := guardianagent.ResolveHostParams("ssh", sshCommandLine)
 	if err != nil {
-		log.Printf("%s: failed to resolve remote using 'ssh %s': %s. Using fallback resolution.", os.Args[0], sshCommandLine, err)
+		log.Printf("%s. Using fallback resolution.", sshCommandLine, err)
 		return fallbackResolveRemote(opts, userAndHost)
-	}
-	lineScanner := bufio.NewScanner(bytes.NewReader(output))
-	lineScanner.Split(bufio.ScanLines)
-	for lineScanner.Scan() {
-		line := lineScanner.Text()
-		if strings.HasPrefix(strings.ToLower(line), "hostname ") {
-			host = line[len("hostname "):]
-		} else if strings.HasPrefix(strings.ToLower(line), "user ") {
-			username = line[len("user "):]
-		} else if strings.HasPrefix(strings.ToLower(line), "port ") {
-			port, _ = strconv.Atoi(line[len("port "):])
-		}
 	}
 	return host, port, username
 }
 
-func fallbackResolveRemote(opts *options, userAndHost string) (host string, port int, username string) {
+func fallbackResolveRemote(opts *options, userAndHost string) (host string, port uint32, username string) {
 	userHost := strings.Split(userAndHost, "@")
 	host = userHost[len(userHost)-1]
 	if opts.Username != "" {

@@ -80,7 +80,7 @@ func (tui *FancyTerminalUI) Inform(msg string) {
 	tui.mu.Lock()
 	defer tui.mu.Unlock()
 
-	fmt.Println(msg)
+	fmt.Fprintln(os.Stderr, msg)
 }
 
 func (tui *FancyTerminalUI) Alert(msg string) {
@@ -94,7 +94,7 @@ func (tui *FancyTerminalUI) AskPassword(msg string) (string, error) {
 	tui.mu.Lock()
 	defer tui.mu.Unlock()
 
-	fmt.Println(msg)
+	fmt.Fprintln(os.Stderr, msg)
 	passBytes, err := gopass.GetPasswd()
 	if err == nil {
 		return string(passBytes), nil
@@ -126,7 +126,7 @@ func (AskPassUI) Ask(params Prompt) (reply int, err error) {
 }
 
 func (AskPassUI) Inform(msg string) {
-	fmt.Println(msg)
+	fmt.Fprintln(os.Stderr, msg)
 }
 
 func (AskPassUI) Alert(msg string) {

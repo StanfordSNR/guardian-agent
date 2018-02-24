@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"os/user"
 	"path"
 	"sync"
 
@@ -371,17 +370,13 @@ func (c *client) runDirect() error {
 		serverEnd.Close()
 	}()
 
-	curuser, err := user.Current()
-	if err != nil {
-		return fmt.Errorf("Failed to get current user: %s", err)
-	}
 	ui := FancyTerminalUI{}
 	config := ssh.ClientConfig{
 		User: c.Username,
 		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 			return HostKeyCallback(hostname, remote, key, &ui)
 		},
-		Auth: getAuth(c.Username, c.HostPort, curuser.HomeDir, &ui),
+		Auth: getAuth(c.Username, c.HostPort, &ui),
 	}
 
 	cc, chans, reqs, err := ssh.NewClientConn(clientEnd, c.HostPort, &config)

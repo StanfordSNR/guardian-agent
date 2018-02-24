@@ -3,8 +3,10 @@
 package main
 
 import (
+	"crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net"
@@ -12,10 +14,9 @@ import (
 	"path"
 	"syscall"
 
-	"github.com/StanfordSNR/guardian-agent"
+	ga "github.com/StanfordSNR/guardian-agent"
 	flags "github.com/jessevdk/go-flags"
 
-	"github.com/StanfordSNR/guardian-agent/guardo"
 	"github.com/golang/protobuf/proto"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/sys/unix"
@@ -29,6 +30,14 @@ type options struct {
 	Version bool `long:"version" short:"V" description:"Display the version number and exit"`
 
 	AuthorizedKeys string `long:"authorized_keys" description:"Authorized Keys file" default:"/etc/security/authorized_keys"`
+
+	PublicKey []string `long:"public_keys" description:"Server identity public key files" default:"/etc/ssh/ssh_host_dsa_key.pub" default:"/etc/ssh/ssh_host_ecdsa_key.pub" default:"/etc/ssh/ssh_host_ed25519_key.pub" default:"/etc/ssh/ssh_host_rsa_key.pub"`
+}
+
+type guardoAgent struct {
+	authorizedKeys map[string]bool
+	publicKeys     map[string]bool
+	hostname       string
 }
 
 func (opts *options) GetVersion() bool {
@@ -49,17 +58,17 @@ func getUcred(conn *net.UnixConn) *syscall.Ucred {
 	return cred
 }
 
-func createOrOpen(req *guardo.OpenOp, cred *syscall.Ucred) (int, error) {
+func createOrOpen(req *ga.OpenOp, ucred *syscall.Ucred) (int, error) {
 	flags := int(req.GetFlags())
-	if (cred != nil) && (flags&os.O_CREATE != 0) {
+	if (ucred != nil) && (flags&os.O_CREATE != 0) {
 		// First try to create a new file if it doesn't exist
 		fd, err := unix.Open(req.GetPath(), flags|os.O_EXCL, uint32(req.GetMode()))
 		if err == nil {
 			// Change the owner of the file to be the user
-			if chownErr := os.Chown(req.GetPath(), int(cred.Uid), int(cred.Gid)); chownErr != nil {
+			if chownErr := os.Chown(req.GetPath(), int(ucred.Uid), int(ucred.Gid)); chownErr != nil {
 				log.Printf("Failed to chown newly created file to user: %s", chownErr)
 			}
-			log.Printf("Created %s and chowned to %d", req.GetPath(), cred.Uid)
+			log.Printf("Created %s and chowned to %d", req.GetPath(), ucred.Uid)
 			return fd, err
 		}
 		if flags&os.O_EXCL != 0 {
@@ -70,46 +79,56 @@ func createOrOpen(req *guardo.OpenOp, cred *syscall.Ucred) (int, error) {
 	return unix.Open(req.GetPath(), flags, uint32(req.GetMode()))
 }
 
-func HandleOpen(req *guardo.OpenOp, cred *syscall.Ucred) (res *guardo.ElevationResponse, fds []int) {
-	fd, err := createOrOpen(req, cred)
+func handleOpen(req *ga.OpenOp, ucred *syscall.Ucred) *ga.ElevationResponse {
+	fd, err := createOrOpen(req, ucred)
 	if err != nil {
 		log.Printf("open failed: %s", err)
-		return &guardo.ElevationResponse{Result: int32(err.(syscall.Errno))}, nil
+		return &ga.ElevationResponse{Result: int32(err.(syscall.Errno))}
 	}
-	return &guardo.ElevationResponse{IsResultFd: true}, []int{fd}
+	return &ga.ElevationResponse{IsResultFd: true, Result: int32(fd)}
 }
 
-func HandleUnlink(req *guardo.UnlinkOp) *guardo.ElevationResponse {
+func handleUnlink(req *ga.UnlinkOp) *ga.ElevationResponse {
 	err := unix.Unlinkat(unix.AT_FDCWD, req.GetPath(), int(req.GetFlags()))
 	if err != nil {
 		log.Printf("unlink failed: %s", err)
-		return &guardo.ElevationResponse{Result: int32(err.(syscall.Errno))}
+		return &ga.ElevationResponse{Result: int32(err.(syscall.Errno))}
 	}
-	return &guardo.ElevationResponse{Result: 0}
+	return &ga.ElevationResponse{Result: 0}
 }
 
-func HandleAccess(req *guardo.AccessOp) *guardo.ElevationResponse {
+func handleAccess(req *ga.AccessOp) *ga.ElevationResponse {
 	err := unix.Access(req.GetPath(), req.GetMode())
 	if err != nil {
 		log.Printf("access failed: %s", err)
-		return &guardo.ElevationResponse{Result: int32(err.(syscall.Errno))}
+		return &ga.ElevationResponse{Result: int32(err.(syscall.Errno))}
 	}
-	return &guardo.ElevationResponse{Result: 0}
+	return &ga.ElevationResponse{Result: 0}
 }
 
-func checkCredential(op *guardo.Operation, cred *guardo.Credential, authKeys map[string]bool) error {
-	if !proto.Equal(op, cred.GetOp()) {
-		return fmt.Errorf("Credential does not match requested operation, requested: %v, credential for: %v", op, cred.GetOp())
+func (guardo *guardoAgent) checkCredential(req *ga.ElevationRequest, challenge *ga.Challenge) error {
+	cred := req.GetCredential()
+	if !proto.Equal(req.GetOp(), cred.GetOp()) {
+		return fmt.Errorf("Credential does not match requested operation, requested: %v, credential for: %v", req.GetOp(), cred.GetOp())
 	}
-	if !authKeys[string(cred.GetSignatureKey())] {
+
+	if cred.GetChallenge().GetServerHostname() != guardo.hostname {
+		return fmt.Errorf("Invalid server hostname")
+	}
+
+	if !guardo.publicKeys[string(cred.GetChallenge().ServerPublicKeys[0])] {
+		return fmt.Errorf("Invalid server public key")
+	}
+
+	if !guardo.authorizedKeys[string(cred.GetSignatureKey())] {
 		return fmt.Errorf("Unauthorized public key")
 	}
 
 	pk, err := ssh.ParsePublicKey(cred.GetSignatureKey())
-	cred_no_sig := *cred
-	cred_no_sig.Signature = nil
-	cred_no_sig.SignatureFormat = ""
-	byte_to_sign, err := proto.Marshal(&cred_no_sig)
+	credNoSig := *cred
+	credNoSig.Signature = nil
+	credNoSig.SignatureFormat = ""
+	bytesToSign, err := proto.Marshal(&credNoSig)
 	if err != nil {
 		return err
 	}
@@ -118,64 +137,115 @@ func checkCredential(op *guardo.Operation, cred *guardo.Credential, authKeys map
 		Blob:   cred.Signature,
 	}
 
-	return pk.Verify(byte_to_sign, sig)
+	return pk.Verify(bytesToSign, sig)
 }
 
-func HandleConnection(c *net.UnixConn, authKeys map[string]bool) error {
-	ucred := getUcred(c)
-	fmt.Printf("\n>>> Got connection from uid: %d, pid: %d\n", ucred.Uid, ucred.Pid)
-	msgNum, payload, err := guardianagent.ReadControlPacket(c)
-	if err != nil || msgNum != guardianagent.MsgNum_ELEVATION_REQUEST {
-		return fmt.Errorf("Invalid request, msgNum: %d: %s", msgNum, err)
-	}
-	req := &guardo.ElevationRequest{}
-	if err := proto.Unmarshal(payload, req); err != nil {
-		return fmt.Errorf("Failed to parse request: %s", err)
-	}
-	op := req.GetOp()
-
-	fmt.Printf("Requested operation: %s\n", op)
-
-	resp := &guardo.ElevationResponse{}
-	if err = checkCredential(op, req.GetCredential(), authKeys); err != nil {
-		resp.Result = -int32(unix.EACCES)
-		payload, _ := proto.Marshal(resp)
-		guardianagent.WriteControlPacket(c, guardianagent.MsgNum_ELEVATION_RESPONSE, payload)
-		return fmt.Errorf("Credentials error: %s", err)
+func writeElevationResponse(c *net.UnixConn, resp *ga.ElevationResponse) error {
+	if resp.IsResultFd {
+		fmt.Printf("<<< Returning file descriptor: %d\n", resp.Result)
+	} else {
+		fmt.Printf("<<< Returning result: %d\n", resp.Result)
 	}
 
-	fmt.Println("Credentials OK")
-
-	var fds []int
-	switch op := op.Op.(type) {
-	case *guardo.Operation_Open:
-		resp, fds = HandleOpen(op.Open, ucred)
-	case *guardo.Operation_Unlink:
-		resp = HandleUnlink(op.Unlink)
-	case *guardo.Operation_Access:
-		resp = HandleAccess(op.Access)
-	default:
-		return fmt.Errorf("Unknown sycall request type")
-	}
 	header := make([]byte, 5)
 	data, err := proto.Marshal(resp)
 	if err != nil {
 		return fmt.Errorf("Failed to Marshal response: %s", err)
 	}
 	binary.BigEndian.PutUint32(header, uint32(len(data)+1))
-	header[4] = byte(guardianagent.MsgNum_ELEVATION_RESPONSE)
+	header[4] = byte(ga.MsgNum_ELEVATION_RESPONSE)
+	fds := []int{}
+	if resp.IsResultFd {
+		fds = append(fds, int(resp.Result))
+	}
 	rights := unix.UnixRights(fds...)
 	_, _, err = c.WriteMsgUnix(append(header[:], data[:]...), rights, nil)
 	if err != nil {
 		return fmt.Errorf("Failed to WriteMsgUnix: %s", err)
 	}
+	return nil
+}
 
-	if resp.IsResultFd && len(fds) > 0 {
-		fmt.Printf("<<< Returning file descriptor: %d\n", fds[0])
-	} else {
-		fmt.Printf("<<< Returning result: %d\n", resp.Result)
+func readRequest(c *net.UnixConn, expectedMsgNum ga.MsgNum, pb proto.Message) error {
+	msgNum, payload, err := ga.ReadControlPacket(c)
+	if err != nil {
+		return fmt.Errorf("Invalid reading incoming packet: %s", err)
+	}
+	if msgNum != expectedMsgNum {
+		return fmt.Errorf("Invalid request, expected: %s, got: %s", expectedMsgNum.String(), msgNum.String())
+	}
+	if err := proto.Unmarshal(payload, pb); err != nil {
+		return fmt.Errorf("Failed to parse request: %s", err)
 	}
 	return nil
+}
+
+func (guardo *guardoAgent) generateChallenge() (*ga.Challenge, error) {
+	nonce := make([]byte, 32)
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return nil, err
+	}
+	resp := &ga.Challenge{
+		ServerNonce:    nonce,
+		ServerHostname: guardo.hostname,
+	}
+	for pk := range guardo.publicKeys {
+		resp.ServerPublicKeys = append(resp.ServerPublicKeys, []byte(pk))
+	}
+	return resp, nil
+}
+
+func (guardo *guardoAgent) handleConnection(c *net.UnixConn) error {
+	ucred := getUcred(c)
+	fmt.Printf("\n>>> Got connection from uid: %d, pid: %d\n", ucred.Uid, ucred.Pid)
+
+	challengeReq := &ga.ChallengeRequest{}
+	if err := readRequest(c, ga.MsgNum_CHALLENGE_REQUEST, challengeReq); err != nil {
+		return err
+	}
+
+	challenge, err := guardo.generateChallenge()
+	if err != nil {
+		return err
+	}
+
+	respBytes, err := proto.Marshal(challenge)
+	if err != nil {
+		return fmt.Errorf("Failed to serialize challenge: %s", err)
+	}
+	if err := ga.WriteControlPacket(c, ga.MsgNum_CHALLENGE_RESPONSE, respBytes); err != nil {
+		return fmt.Errorf("Failed to write challenge response: %s", err)
+	}
+
+	elevReq := &ga.ElevationRequest{}
+	if err := readRequest(c, ga.MsgNum_ELEVATION_REQUEST, elevReq); err != nil {
+		return err
+	}
+
+	op := elevReq.GetOp()
+	fmt.Printf("Requested operation: %s\n", op)
+
+	resp := &ga.ElevationResponse{}
+	if err := guardo.checkCredential(elevReq, challenge); err != nil {
+		resp.Result = -int32(unix.EACCES)
+		writeElevationResponse(c, resp)
+		return fmt.Errorf("Credentials error: %s", err)
+	}
+
+	fmt.Fprintln(os.Stderr, "Credentials OK")
+
+	switch op := op.Op.(type) {
+	case *ga.Operation_Open:
+		resp = handleOpen(op.Open, ucred)
+	case *ga.Operation_Unlink:
+		resp = handleUnlink(op.Unlink)
+	case *ga.Operation_Access:
+		resp = handleAccess(op.Access)
+	default:
+		return fmt.Errorf("Unknown sycall request type")
+	}
+
+	return writeElevationResponse(c, resp)
 }
 
 func main() {
@@ -186,11 +256,11 @@ func main() {
 		return args, nil
 	}
 
-	guardianagent.ParseCommandLineOrDie(parser, &opts)
+	ga.ParseCommandLineOrDie(parser, &opts)
 
 	authorizedKeysBytes, err := ioutil.ReadFile(opts.AuthorizedKeys)
 	if err != nil {
-		fmt.Printf("Failed to load authorized_keys, err: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Failed to load authorized_keys, err: %v\n", err)
 		os.Exit(255)
 	}
 
@@ -198,7 +268,7 @@ func main() {
 	for len(authorizedKeysBytes) > 0 {
 		pubKey, _, _, rest, err := ssh.ParseAuthorizedKey(authorizedKeysBytes)
 		if err != nil {
-			fmt.Println(err)
+			fmt.Fprintln(os.Stderr, err)
 			os.Exit(255)
 		}
 
@@ -206,11 +276,36 @@ func main() {
 		authorizedKeysBytes = rest
 	}
 
+	publicKeys := map[string]bool{}
+	for _, pkFile := range opts.PublicKey {
+		if _, err := os.Stat(pkFile); os.IsNotExist(err) {
+			continue
+		}
+		pkBytes, err := ioutil.ReadFile(pkFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to load public key, err: %v\n", err)
+			os.Exit(255)
+		}
+
+		pubKey, _, _, _, err := ssh.ParseAuthorizedKey(pkBytes)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(255)
+		}
+
+		publicKeys[string(pubKey.Marshal())] = true
+	}
+
+	if len(publicKeys) == 0 {
+		fmt.Fprintln(os.Stderr, "Error: did not find any server public key\n")
+		os.Exit(255)
+	}
+
 	sockPath := path.Join("/tmp", ".guardo-sock")
 	if _, err := os.Lstat(sockPath); err == nil {
 		err = os.Remove(sockPath)
 		if err != nil {
-			fmt.Printf("Failed to remove old permanent socket: %s\n", err)
+			fmt.Fprintf(os.Stderr, "Failed to remove old permanent socket: %s\n", err)
 			os.Exit(255)
 		}
 	}
@@ -224,15 +319,25 @@ func main() {
 
 	fmt.Printf("Listening on %s for incoming elevation requests...\n", unixAddr)
 
+	hostname, err := os.Hostname()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to resolve local hostname: %s\n", err)
+	}
+	guardo := &guardoAgent{
+		hostname:       hostname,
+		authorizedKeys: authorizedKeysMap,
+		publicKeys:     publicKeys,
+	}
+
 	for {
 		c, err := s.AcceptUnix()
 		if err != nil {
-			fmt.Printf("Error accepting connection: %s\n", err)
+			fmt.Fprintf(os.Stderr, "Error accepting connection: %s\n", err)
 			os.Exit(255)
 		}
 		go func() {
-			if err = HandleConnection(c, authorizedKeysMap); err != nil {
-				fmt.Printf("%v\n", err)
+			if err = guardo.handleConnection(c); err != nil {
+				fmt.Fprintf(os.Stderr, "%v\n", err)
 			}
 		}()
 	}

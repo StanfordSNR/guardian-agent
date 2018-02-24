@@ -40,7 +40,7 @@ func main() {
 	var sshOptions []string
 	parser.UnknownOptionHandler = func(option string, arg flags.SplitArgument, args []string) ([]string, error) {
 		val, isSet := arg.Value()
-		sshFlagsWithValues := "bcDEeFIiLmOopQRWw"
+		sshFlagsWithValues := "bcDEeFIilLmOopQRWw"
 
 		if isSet {
 			sshOptions = append(sshOptions, fmt.Sprintf("-%s", option), val)
@@ -54,12 +54,6 @@ func main() {
 	}
 
 	guardianagent.ParseCommandLineOrDie(parser, &opts)
-
-	readableName := opts.SSHCommand.UserHost
-	if parser.FindOptionByShortName('l').IsSet() {
-		readableName = opts.Username + "@" + readableName
-		sshOptions = append(sshOptions, "-l", opts.Username)
-	}
 
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	if opts.Debug {
@@ -91,35 +85,29 @@ func main() {
 		ag, err = guardianagent.NewGuardian(opts.PolicyConfig, guardianagent.Terminal)
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s", err)
+		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(255)
 	}
-	sshFwd := guardianagent.SSHFwd{
-		SSHProgram:         opts.SSHProgram,
-		SSHArgs:            sshOptions,
-		Host:               opts.SSHCommand.UserHost,
-		RemoteReadableName: readableName,
-		RemoteStubName:     opts.RemoteStubName,
-	}
+	sshFwd := guardianagent.NewSSHFwd(opts.SSHProgram, sshOptions, opts.SSHCommand.UserHost, opts.RemoteStubName)
 
-	fmt.Printf("Connecting to %s to set up forwarding...\n", readableName)
+	fmt.Fprintf(os.Stderr, "Setting up forwarding...\n")
 	if err = sshFwd.SetupForwarding(); err != nil {
 		fmt.Fprintf(os.Stderr, "%s", err)
 		os.Exit(255)
 	}
 
-	fmt.Printf("Forwarding to %s setup successfully. Waiting for incoming requests...\n", readableName)
+	fmt.Fprintf(os.Stderr, "Forwarding to %s setup successfully. Waiting for incoming requests...\n", sshFwd.RemoteReadableName)
 
 	var c net.Conn
 	for {
 		c, err = sshFwd.Accept()
 		if err != nil {
-			log.Printf("Error forwarding: %s", err)
+			fmt.Fprintf(os.Stderr, "Error forwarding: %s\n", err)
 			os.Exit(255)
 		}
 		go func() {
 			if err = ag.HandleConnection(c); err != nil {
-				log.Printf("Error forwarding: %s", err)
+				fmt.Fprintf(os.Stderr, "Error forwarding: %s\n", err)
 			}
 		}()
 	}

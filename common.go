@@ -1,6 +1,8 @@
 package guardianagent
 
 import (
+	"bufio"
+	"bytes"
 	"crypto/md5"
 	"crypto/x509"
 	"encoding/binary"
@@ -12,8 +14,10 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"os/user"
 	"path"
+	"strconv"
 	"strings"
 
 	flags "github.com/jessevdk/go-flags"
@@ -38,7 +42,9 @@ type AgentCExtensionMsg struct {
 }
 
 type AgentForwardingNoticeMsg struct {
-	Client string
+	ReadableName string
+	Host         string
+	Port         uint32
 }
 
 const MaxAgentPacketSize = 10 * 1024
@@ -113,7 +119,6 @@ func ReadControlPacket(r io.Reader) (msgNum MsgNum, payload []byte, err error) {
 	if debugCommon {
 		log.Printf("read: %s", hex.EncodeToString(payload[:]))
 	}
-
 	return MsgNum(payload[0]), payload[1:], err
 }
 
@@ -154,7 +159,7 @@ func UserTempDir() string {
 	if err == nil {
 		return dir
 	}
-	return os.Getenv("HOME")
+	return UserHomeDir()
 }
 
 func UserRuntimeDir() string {
@@ -162,13 +167,27 @@ func UserRuntimeDir() string {
 	if dir != "" {
 		return dir
 	}
-	return os.Getenv("HOME")
+	return UserHomeDir()
+}
+
+func KnownHostsPath() string {
+	return path.Join(UserSshDir(), "known_hosts")
+}
+
+func UserHomeDir() string {
+	usr, err := user.Current()
+	if err != nil {
+		return os.Getenv("HOME")
+	}
+	return usr.HomeDir
+}
+
+func UserSshDir() string {
+	return path.Join(UserHomeDir(), ".ssh")
 }
 
 type CommonOptions struct {
 	Debug bool `long:"debug" description:"Show debug information"`
-
-	Username string `short:"l" description:"Specifies the user to log in as on the remote machine"`
 
 	LogFile string `long:"log" description:"log file"`
 
@@ -205,7 +224,8 @@ func ParseCommandLineOrDie(parser *flags.Parser, opts Options) {
 }
 
 // Adapted from https://github.com/coreos/fleet/blob/master/ssh/known_hosts.go
-func putHostKey(knownHostsPath string, addr string, hostKey ssh.PublicKey) error {
+func putHostKey(addr string, hostKey ssh.PublicKey) error {
+	knownHostsPath := KnownHostsPath()
 	// Make necessary directories if needed
 	err := os.MkdirAll(path.Dir(knownHostsPath), 0700)
 	if err != nil {
@@ -255,13 +275,8 @@ func md5String(md5Sum [16]byte) string {
 }
 
 func HostKeyCallback(hostname string, remote net.Addr, key ssh.PublicKey, ui UI) error {
-	curuser, err := user.Current()
-	if err != nil {
-		return fmt.Errorf("Failed to get current user: %s", err)
-	}
 	keyFingerprintStr := md5String(md5.Sum(key.Marshal()))
-	knownHostsPath := path.Join(curuser.HomeDir, ".ssh", "known_hosts")
-	if kh, err := knownhosts.New(knownHostsPath); err == nil {
+	if kh, err := knownhosts.New(KnownHostsPath()); err == nil {
 		if err = kh(hostname, remote, key); err == nil {
 			return nil
 		}
@@ -271,13 +286,13 @@ func HostKeyCallback(hostname string, remote net.Addr, key ssh.PublicKey, ui UI)
 		}
 
 		if kErr, ok := err.(*knownhosts.KeyError); ok && len(kErr.Want) > 0 {
-			ui.Alert(fmt.Sprintf(warningRemoteHostChanged, key.Type(), keyFingerprintStr, knownHostsPath))
+			ui.Alert(fmt.Sprintf(warningRemoteHostChanged, key.Type(), keyFingerprintStr, KnownHostsPath()))
 			return kErr
 		}
 	}
 
 	if ui.Confirm(fmt.Sprintf(promptToTrustHost, hostname, key.Type(), keyFingerprintStr)) {
-		return putHostKey(knownHostsPath, knownhosts.Normalize(hostname), key)
+		return putHostKey(knownhosts.Normalize(hostname), key)
 	}
 
 	return &knownhosts.KeyError{}
@@ -313,14 +328,14 @@ func getKeyFileAuth(keyPath string, ui UI) (ssh.Signer, error) {
 	return key, nil
 }
 
-func getAuth(username string, host string, homeDir string, ui UI) []ssh.AuthMethod {
+func getAuth(username string, host string, ui UI) []ssh.AuthMethod {
 	passwordAuthMethod := ssh.PasswordCallback(func() (string, error) {
 		return ui.AskPassword(fmt.Sprintf("%s@%s password:", username, host))
 	})
-	return []ssh.AuthMethod{ssh.PublicKeys(getSigners(homeDir, ui)...), passwordAuthMethod}
+	return []ssh.AuthMethod{ssh.PublicKeys(getSigners(ui)...), passwordAuthMethod}
 }
 
-func getSigners(homeDir string, ui UI) []ssh.Signer {
+func getSigners(ui UI) []ssh.Signer {
 	realAgentPath := os.Getenv("SSH_AUTH_SOCK")
 	if realAgentPath != "" {
 		realAgent, err := net.Dial("unix", realAgentPath)
@@ -338,7 +353,7 @@ func getSigners(homeDir string, ui UI) []ssh.Signer {
 
 	var signers []ssh.Signer
 	for _, keyFile := range []string{"identity", "id_dsa", "id_rsa", "id_ecdsa", "id_ed25519"} {
-		keyPath := path.Join(homeDir, ".ssh", keyFile)
+		keyPath := path.Join(UserSshDir(), keyFile)
 		if _, err := os.Stat(keyPath); os.IsNotExist(err) {
 			continue
 		}
@@ -350,4 +365,26 @@ func getSigners(homeDir string, ui UI) []ssh.Signer {
 		signers = append(signers, signer)
 	}
 	return signers
+}
+
+func ResolveHostParams(sshProgram string, sshArgs []string) (host string, port uint32, username string, err error) {
+	sshChild := exec.Command(sshProgram, append([]string{"-G"}, sshArgs...)...)
+	output, err := sshChild.Output()
+	if err != nil {
+		return "", 0, "", fmt.Errorf("Failed to resolve remote using '%s %s': %s", sshProgram, sshArgs, err)
+	}
+	lineScanner := bufio.NewScanner(bytes.NewReader(output))
+	lineScanner.Split(bufio.ScanLines)
+	for lineScanner.Scan() {
+		line := lineScanner.Text()
+		if strings.HasPrefix(strings.ToLower(line), "hostname ") {
+			host = line[len("hostname "):]
+		} else if strings.HasPrefix(strings.ToLower(line), "user ") {
+			username = line[len("user "):]
+		} else if strings.HasPrefix(strings.ToLower(line), "port ") {
+			port64, _ := strconv.ParseUint(line[len("port "):], 10, 32)
+			port = uint32(port64)
+		}
+	}
+	return
 }

@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package guardo;
+package guardian_agent;
 
-option go_package = "./guardo;guardo";
+option go_package = "guardianagent";
 
 message OpenOp {
     string path = 1;
@@ -30,24 +30,33 @@ message Operation {
 
 message CredentialRequest {
     Operation op = 1;
+    Challenge challenge = 2;
 }
 
 message Credential {
-    bytes signer_nonce = 1;
-    Operation op = 2;
-    string signature_format = 3;
-    bytes signature_key = 4;
-    bytes signature = 5;
+    Operation op = 1;
+    Challenge challenge = 2;
+    bytes signer_nonce = 3;
+    string signature_format = 4;
+    bytes signature_key = 5;
+    bytes signature = 6;
 }
 
-message CredentiallResponse {
+message CredentialResponse {
     enum Status {
         APPROVED = 0;
         DENIED = 1;
-        ERROR = 2;
     }
     Status status = 1;
     Credential credential = 2;
+}
+
+message ChallengeRequest {}
+
+message Challenge {
+    bytes server_nonce = 1;
+    string server_hostname = 2;
+    repeated bytes server_public_keys = 3;
 }
 
 message ElevationRequest {

@@ -24,20 +24,43 @@ import (
 const debugSSHFwd = true
 
 type SSHFwd struct {
-	SSHProgram         string
-	SSHArgs            []string
-	Host               string
 	RemoteReadableName string
-	RemoteStubName     string
+
+	sshProgram     string
+	sshArgs        []string
+	remoteStubName string
+
+	host string
+	port uint32
 
 	localSocket  string
 	remoteSocket string
 	listener     net.Listener
 }
 
+func NewSSHFwd(sshProgram string, sshOptions []string, userHost string, stubName string) *SSHFwd {
+	sshArgs := append(sshOptions, "-S", path.Join(UserTempDir(), strconv.Itoa(int(rand.Int31()))), userHost)
+	host, port, username, err := ResolveHostParams(sshProgram, sshArgs)
+	if err != nil {
+		log.Printf("%s", err)
+	}
+	remoteReadableName := fmt.Sprintf("%s@%s:%d", username, host, port)
+	if userHost != host && userHost != username+"@"+host {
+		remoteReadableName = userHost + "[" + remoteReadableName + "]"
+	}
+
+	return &SSHFwd{
+		sshProgram:         sshProgram,
+		sshArgs:            sshArgs,
+		RemoteReadableName: remoteReadableName,
+		remoteStubName:     stubName,
+		host:               host,
+		port:               port,
+	}
+}
+
 func (fwd *SSHFwd) SetupForwarding() error {
-	fwd.SSHArgs = append(fwd.SSHArgs, "-S", path.Join(UserTempDir(), strconv.Itoa(int(rand.Int31()))), fwd.Host)
-	remoteStub := exec.Command(fwd.SSHProgram, append(fwd.SSHArgs, "-M", fwd.RemoteStubName)...)
+	remoteStub := exec.Command(fwd.sshProgram, append(fwd.sshArgs, "-M", fwd.remoteStubName)...)
 	remoteStdErr, err := remoteStub.StderrPipe()
 	if err != nil {
 		return fmt.Errorf("Failed to get ssh stderr: %s", err)
@@ -98,8 +121,8 @@ func (fwd *SSHFwd) SetupForwarding() error {
 		fwd.listener.Close()
 	}()
 
-	child := exec.Command(fwd.SSHProgram,
-		append(fwd.SSHArgs, "-o ExitOnForwardFailure yes", "-T", "-O", "forward",
+	child := exec.Command(fwd.sshProgram,
+		append(fwd.sshArgs, "-o ExitOnForwardFailure yes", "-T", "-O", "forward",
 			fmt.Sprintf("-R %s:%s", string(remoteSocket), bindAddr))...)
 	_, err = child.Output()
 	if err != nil {
@@ -124,11 +147,11 @@ func (fwd *SSHFwd) SetupForwarding() error {
 
 func (fwd *SSHFwd) RunRemote(cmd string) error {
 	if cmd == "" {
-		fwd.SSHArgs = append(fwd.SSHArgs, "-t")
+		fwd.sshArgs = append(fwd.sshArgs, "-t")
 	} else {
-		fwd.SSHArgs = append(fwd.SSHArgs, cmd)
+		fwd.sshArgs = append(fwd.sshArgs, cmd)
 	}
-	child := exec.Command(fwd.SSHProgram, fwd.SSHArgs...)
+	child := exec.Command(fwd.sshProgram, fwd.sshArgs...)
 
 	child.Stderr = os.Stderr
 	child.Stdout = os.Stdout
@@ -157,7 +180,7 @@ func (fwd *SSHFwd) Accept() (net.Conn, error) {
 		client.Close()
 	}()
 	go func() {
-		msg := AgentForwardingNoticeMsg{Client: fwd.RemoteReadableName}
+		msg := AgentForwardingNoticeMsg{ReadableName: fwd.RemoteReadableName, Host: fwd.host, Port: fwd.port}
 		if err = WriteControlPacket(clientPipe, MsgNum_AGENT_FORWARDING_NOTICE, ssh.Marshal(msg)); err != nil {
 			log.Printf("Failed to send message to agent: %s", err)
 			return
@@ -173,7 +196,7 @@ func (fwd *SSHFwd) Accept() (net.Conn, error) {
 }
 
 func (fwd *SSHFwd) Close() {
-	child := exec.Command(fwd.SSHProgram, append(fwd.SSHArgs, "-O exit")...)
+	child := exec.Command(fwd.sshProgram, append(fwd.sshArgs, "-O exit")...)
 	child.Run()
 	os.Remove(fwd.localSocket)
 	fwd.listener.Close()
