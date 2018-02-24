@@ -23,12 +23,7 @@ import (
 )
 
 type options struct {
-	Debug bool `long:"debug" description:"Show debug information"`
-
-	LogFile string `long:"log" description:"log file"`
-
-	Version bool `long:"version" short:"V" description:"Display the version number and exit"`
-
+	ga.CommonOptions
 	AuthorizedKeys string `long:"authorized_keys" description:"Authorized Keys file" default:"/etc/security/authorized_keys"`
 
 	PublicKey []string `long:"public_keys" description:"Server identity public key files" default:"/etc/ssh/ssh_host_dsa_key.pub" default:"/etc/ssh/ssh_host_ecdsa_key.pub" default:"/etc/ssh/ssh_host_ed25519_key.pub" default:"/etc/ssh/ssh_host_rsa_key.pub"`

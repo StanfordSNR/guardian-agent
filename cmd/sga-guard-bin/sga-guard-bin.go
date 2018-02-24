@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"runtime"
 	"strings"
 
@@ -98,9 +99,24 @@ func main() {
 
 	fmt.Fprintf(os.Stderr, "Forwarding to %s setup successfully. Waiting for incoming requests...\n", sshFwd.RemoteReadableName)
 
+	ints := make(chan os.Signal, 1)
+	signal.Notify(ints, os.Interrupt)
+	shutdown := false
+	go func() {
+		for range ints {
+			fmt.Fprintf(os.Stderr, "Got Interrupt signal, shutting down...\n")
+			shutdown = true
+			sshFwd.Close()
+		}
+	}()
+
 	var c net.Conn
 	for {
 		c, err = sshFwd.Accept()
+		if shutdown {
+			fmt.Fprintln(os.Stderr, "Shutdown complete\n")
+			os.Exit(0)
+		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error forwarding: %s\n", err)
 			os.Exit(255)

@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/user"
@@ -83,22 +82,6 @@ func main() {
 
 		fmt.Fprintf(os.Stderr, "%s: unsupported option: %s", os.Args[0], sshOption)
 		os.Exit(255)
-	}
-
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	if opts.Debug {
-		if opts.LogFile == "" {
-			log.SetOutput(os.Stderr)
-		} else {
-			f, err := os.OpenFile(opts.LogFile, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0644)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "%s: failed to open log file: %s", os.Args[0], err)
-				os.Exit(255)
-			}
-			log.SetOutput(f)
-		}
-	} else {
-		log.SetOutput(ioutil.Discard)
 	}
 
 	var host string

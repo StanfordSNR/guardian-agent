@@ -194,17 +194,17 @@ type CommonOptions struct {
 	Version bool `long:"version" short:"V" description:"Display the version number and exit"`
 }
 
-func (opts *CommonOptions) GetVersion() bool {
-	return opts.Version
+func (opts CommonOptions) GetCommon() *CommonOptions {
+	return &opts
 }
 
 type Options interface {
-	GetVersion() bool
+	GetCommon() *CommonOptions
 }
 
 func ParseCommandLineOrDie(parser *flags.Parser, opts Options) {
 	_, err := parser.Parse()
-	if opts.GetVersion() {
+	if opts.GetCommon().Version {
 		fmt.Println(Version)
 		os.Exit(0)
 	}
@@ -220,6 +220,22 @@ func ParseCommandLineOrDie(parser *flags.Parser, opts Options) {
 		}
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 		os.Exit(255)
+	}
+
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	if opts.GetCommon().Debug {
+		if opts.GetCommon().LogFile == "" {
+			log.SetOutput(os.Stderr)
+		} else {
+			f, err := os.OpenFile(opts.GetCommon().LogFile, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0644)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s: failed to open log file: %s", os.Args[0], err)
+				os.Exit(255)
+			}
+			log.SetOutput(f)
+		}
+	} else {
+		log.SetOutput(ioutil.Discard)
 	}
 }
 
