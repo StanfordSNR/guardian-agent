@@ -158,6 +158,7 @@ static void hook(long syscall_number,
 
     Operation op;
     switch (syscall_number) {
+	// Must be in sync with switch statement in 'safe_hook' below.
         case SYS_open: 
             create_open_op(AT_FDCWD, (char*)arg0, arg1, arg2, op.mutable_open());
             break;
@@ -218,6 +219,17 @@ static int safe_hook(long syscall_number,
                      long arg5,
                      long *result)
 {
+    switch (syscall_number) {
+    case SYS_open: 
+    case SYS_openat:
+    case SYS_unlink:
+    case SYS_unlinkat:
+    case SYS_access:
+        break;
+    default:
+        return 1;
+    }
+
     long real_result = syscall_no_intercept(syscall_number, arg0, arg1, arg2, arg3, arg4, arg5);
     *result = real_result;
     if (real_result != -EACCES) {
