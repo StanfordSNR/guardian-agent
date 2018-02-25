@@ -78,7 +78,7 @@ func handleOpen(req *ga.OpenOp, ucred *syscall.Ucred) *ga.ElevationResponse {
 	fd, err := createOrOpen(req, ucred)
 	if err != nil {
 		log.Printf("open failed: %s", err)
-		return &ga.ElevationResponse{Result: int32(err.(syscall.Errno))}
+		return &ga.ElevationResponse{Result: -int32(err.(syscall.Errno))}
 	}
 	return &ga.ElevationResponse{IsResultFd: true, Result: int32(fd)}
 }
@@ -87,7 +87,7 @@ func handleUnlink(req *ga.UnlinkOp) *ga.ElevationResponse {
 	err := unix.Unlinkat(unix.AT_FDCWD, req.GetPath(), int(req.GetFlags()))
 	if err != nil {
 		log.Printf("unlink failed: %s", err)
-		return &ga.ElevationResponse{Result: int32(err.(syscall.Errno))}
+		return &ga.ElevationResponse{Result: -int32(err.(syscall.Errno))}
 	}
 	return &ga.ElevationResponse{Result: 0}
 }
@@ -96,9 +96,18 @@ func handleAccess(req *ga.AccessOp) *ga.ElevationResponse {
 	err := unix.Access(req.GetPath(), req.GetMode())
 	if err != nil {
 		log.Printf("access failed: %s", err)
-		return &ga.ElevationResponse{Result: int32(err.(syscall.Errno))}
+		return &ga.ElevationResponse{Result: -int32(err.(syscall.Errno))}
 	}
 	return &ga.ElevationResponse{Result: 0}
+}
+
+func handleSocket(req *ga.SocketOp) *ga.ElevationResponse {
+	fd, err := unix.Socket(int(req.GetDomain()), int(req.GetType()), int(req.GetProtocol()))
+	if err != nil {
+		log.Printf("socket failed: %s", err)
+		return &ga.ElevationResponse{Result: -int32(err.(syscall.Errno))}
+	}
+	return &ga.ElevationResponse{IsResultFd: true, Result: int32(fd)}
 }
 
 func (guardo *guardoAgent) checkCredential(req *ga.ElevationRequest, challenge *ga.Challenge) error {
@@ -137,9 +146,9 @@ func (guardo *guardoAgent) checkCredential(req *ga.ElevationRequest, challenge *
 
 func writeElevationResponse(c *net.UnixConn, resp *ga.ElevationResponse) error {
 	if resp.IsResultFd {
-		fmt.Printf("<<< Returning file descriptor: %d\n", resp.Result)
+		fmt.Fprintf(os.Stderr, "<<< Returning file descriptor: %d\n", resp.Result)
 	} else {
-		fmt.Printf("<<< Returning result: %d\n", resp.Result)
+		fmt.Fprintf(os.Stderr, "<<< Returning result: %d\n", resp.Result)
 	}
 
 	header := make([]byte, 5)
@@ -192,7 +201,7 @@ func (guardo *guardoAgent) generateChallenge() (*ga.Challenge, error) {
 
 func (guardo *guardoAgent) handleConnection(c *net.UnixConn) error {
 	ucred := getUcred(c)
-	fmt.Printf("\n>>> Got connection from uid: %d, pid: %d\n", ucred.Uid, ucred.Pid)
+	fmt.Fprintf(os.Stderr, "\n>>> Got connection from uid: %d, pid: %d\n", ucred.Uid, ucred.Pid)
 
 	challengeReq := &ga.ChallengeRequest{}
 	if err := readRequest(c, ga.MsgNum_CHALLENGE_REQUEST, challengeReq); err != nil {
@@ -218,7 +227,7 @@ func (guardo *guardoAgent) handleConnection(c *net.UnixConn) error {
 	}
 
 	op := elevReq.GetOp()
-	fmt.Printf("Requested operation: %s\n", op)
+	fmt.Fprintf(os.Stderr, "Requested operation: %s\n", op)
 
 	resp := &ga.ElevationResponse{}
 	if err := guardo.checkCredential(elevReq, challenge); err != nil {
@@ -236,6 +245,8 @@ func (guardo *guardoAgent) handleConnection(c *net.UnixConn) error {
 		resp = handleUnlink(op.Unlink)
 	case *ga.Operation_Access:
 		resp = handleAccess(op.Access)
+	case *ga.Operation_Socket:
+		resp = handleSocket(op.Socket)
 	default:
 		return fmt.Errorf("Unknown sycall request type")
 	}
@@ -292,7 +303,7 @@ func main() {
 	}
 
 	if len(publicKeys) == 0 {
-		fmt.Fprintln(os.Stderr, "Error: did not find any server public key\n")
+		fmt.Fprintln(os.Stderr, "Error: did not find any server public key")
 		os.Exit(255)
 	}
 
@@ -306,13 +317,13 @@ func main() {
 	}
 	unixAddr, err := net.ResolveUnixAddr("unix", sockPath)
 	if err != nil {
-		fmt.Printf("Failed to reslve unix addr: %s", err)
+		fmt.Fprintf(os.Stderr, "Failed to reslve unix addr: %s", err)
 	}
 	s, err := net.ListenUnix("unix", unixAddr)
 	defer os.Remove(sockPath)
 	os.Chmod(sockPath, os.ModePerm)
 
-	fmt.Printf("Listening on %s for incoming elevation requests...\n", unixAddr)
+	fmt.Fprintf(os.Stderr, "Listening on %s for incoming elevation requests...\n", unixAddr)
 
 	hostname, err := os.Hostname()
 	if err != nil {

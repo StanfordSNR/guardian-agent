@@ -76,6 +76,13 @@ bool create_access_op(const char* path,
     return true;
 }
 
+void create_socket_op(int domain, int type, int protocol, SocketOp* socket_op)
+{
+    socket_op->set_domain(domain);
+    socket_op->set_type(type);
+    socket_op->set_protocol(protocol);
+}
+
 fs::path user_runtime_dir()
 {
     const char* dir = std::getenv("XDG_RUNTIME_DIR");
@@ -183,6 +190,9 @@ static void hook(long syscall_number,
         case SYS_access:
             should_hook = create_access_op((char*)arg0, (int)arg1, op.mutable_access());
             break;
+        case SYS_socket:
+            create_socket_op((int)arg0, (int)arg1, (int)arg2, op.mutable_socket());
+            break;
         default:
             std::cerr << "Error: unexpected intercepted syscall: " << syscall_number << std::endl;
             return;
@@ -248,6 +258,7 @@ static int safe_hook(long syscall_number,
     case SYS_unlink:
     case SYS_unlinkat:
     case SYS_access:
+    case SYS_socket:
         break;
     default:
         return 1;
@@ -255,7 +266,7 @@ static int safe_hook(long syscall_number,
 
     long real_result = syscall_no_intercept(syscall_number, arg0, arg1, arg2, arg3, arg4, arg5);
     *result = real_result;
-    if (real_result != -EACCES) {
+    if ((real_result != -EACCES) && (real_result != -EPERM)) {
         return 0;
     }
 

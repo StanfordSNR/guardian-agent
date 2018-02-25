@@ -20,11 +20,18 @@ message AccessOp {
     uint32 mode = 2;
 }
 
+message SocketOp {
+    int32 domain = 1;
+    int32 type = 2;
+    int32 protocol = 3;
+}
+
 message Operation {
     oneof op {
         OpenOp open = 1;
         UnlinkOp unlink = 2;
         AccessOp access = 3;
+        SocketOp socket = 4;
     }
 }
 
