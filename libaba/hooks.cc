@@ -83,6 +83,14 @@ void create_socket_op(int domain, int type, int protocol, SocketOp* socket_op)
     socket_op->set_protocol(protocol);
 }
 
+void create_bind_op(int sockfd, const struct sockaddr *addr, socklen_t addrlen, 
+                    BindOp* bind_op, std::vector<int>* fds)
+{
+    bind_op->set_addr(std::string((const char*)addr, addrlen));
+    fds->push_back(sockfd);
+}
+
+
 fs::path user_runtime_dir()
 {
     const char* dir = std::getenv("XDG_RUNTIME_DIR");
@@ -172,6 +180,7 @@ static void hook(long syscall_number,
                 long int* result)
 {
     Operation op;
+    std::vector<int> fds;
     bool should_hook = true;
     switch (syscall_number) {
 	// Must be in sync with switch statement in 'safe_hook' below.
@@ -193,6 +202,9 @@ static void hook(long syscall_number,
         case SYS_socket:
             create_socket_op((int)arg0, (int)arg1, (int)arg2, op.mutable_socket());
             break;
+        case SYS_bind:
+            create_bind_op((int)arg0, (sockaddr*)arg1, (socklen_t)arg2, op.mutable_bind(), &fds);
+            break;
         default:
             std::cerr << "Error: unexpected intercepted syscall: " << syscall_number << std::endl;
             return;
@@ -206,7 +218,7 @@ static void hook(long syscall_number,
     socket.connect(Address::NewUnixAddress(fs::path("/tmp") / GUARDO_SOCK_NAME));    
 
     ChallengeRequest challenge_req;
-    socket.write(create_raw_msg(CHALLENGE_REQUEST, challenge_req), true);
+    socket.sendmsg(create_raw_msg(CHALLENGE_REQUEST, challenge_req), std::vector<int>());
     Challenge challenge;
     if (!read_expected_msg(&socket, CHALLENGE_RESPONSE, &challenge)) {
         std::cerr << "Failed to get challenge" << std::endl;
@@ -221,9 +233,9 @@ static void hook(long syscall_number,
     ElevationRequest elevation_request;
     *elevation_request.mutable_op() = op;
     *elevation_request.mutable_credential() = credential;
-    socket.write(create_raw_msg(ELEVATION_REQUEST, elevation_request), true);
+    socket.sendmsg(create_raw_msg(ELEVATION_REQUEST, elevation_request), fds);
 
-    std::vector<int> fds;
+    fds.clear();
     ElevationResponse elevation_response;
     if (!read_expected_msg_with_fd(&socket, ELEVATION_RESPONSE, &elevation_response, &fds)) {
         return;
@@ -259,6 +271,7 @@ static int safe_hook(long syscall_number,
     case SYS_unlinkat:
     case SYS_access:
     case SYS_socket:
+    case SYS_bind:
         break;
     default:
         return 1;

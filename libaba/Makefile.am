@@ -11,4 +11,5 @@ libhooks_la_SOURCES = util.hh \
 	hooks.cc \
 	socket.hh socket.cc \
 	poller.hh poller.cc \
-	timestamp.hh timestamp.cc
+	timestamp.hh timestamp.cc \
+	util.cc

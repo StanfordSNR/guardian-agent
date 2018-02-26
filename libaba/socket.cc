@@ -217,14 +217,14 @@ UnixSocket UnixSocket::accept( void )
   return UnixSocket( FileDescriptor( SystemCall( "accept", ::accept( fd_num(), nullptr, nullptr ) ) ) );
 }
 
-void UnixSocket::sendmsg(std::string & payload, const std::vector<int> & fds)
+void UnixSocket::sendmsg(const std::string & payload, const std::vector<int> & fds)
 {
 	struct msghdr msg;
 	msg.msg_name = NULL;
 	msg.msg_namelen = 0;
 	msg.msg_flags = 0;
 	struct iovec iov[1];
-	iov[0].iov_base = payload.data();
+	iov[0].iov_base = (char*)payload.data();
 	iov[0].iov_len = payload.size();
 	msg.msg_iov = iov;
 	msg.msg_iovlen = 1;

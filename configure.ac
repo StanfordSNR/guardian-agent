@@ -41,5 +41,5 @@ AC_TYPE_UINT16_T
 
 # Checks for library functions.
 
-AC_CONFIG_FILES([Makefile proto/Makefile libaba/Makefile])
+AC_CONFIG_FILES([Makefile proto/Makefile libaba/Makefile gobuild/Makefile])
 AC_OUTPUT

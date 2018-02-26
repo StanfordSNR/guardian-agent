@@ -61,4 +61,6 @@ inline int SystemCall( const std::string & s_attempt, const int return_value )
 /* zero out an arbitrary structure */
 template <typename T> void zero( T & x ) { memset( &x, 0, sizeof( x ) ); }
 
+void dump_hex(const void* data, size_t size);
+
 #endif /* UTIL_HH */

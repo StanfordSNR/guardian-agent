@@ -98,7 +98,7 @@ public:
   /* accept a new incoming connection */
   UnixSocket accept( void );
 
-  void sendmsg(std::string & payload, const std::vector<int> & fds);
+  void sendmsg(const std::string & payload, const std::vector<int> & fds);
   std::string recvmsg(std::vector<int>* fds);
 
   FileDescriptor recv_fd();

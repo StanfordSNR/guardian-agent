@@ -26,12 +26,18 @@ message SocketOp {
     int32 protocol = 3;
 }
 
+message BindOp {
+    int32 sockfd = 1;
+    bytes addr = 2;
+}
+
 message Operation {
     oneof op {
         OpenOp open = 1;
         UnlinkOp unlink = 2;
         AccessOp access = 3;
         SocketOp socket = 4;
+        BindOp bind = 5;
     }
 }
 
