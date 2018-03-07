@@ -55,33 +55,18 @@ func getUcred(conn *net.UnixConn) *syscall.Ucred {
 	return cred
 }
 
-func createOrOpen(req *ga.OpenOp, ucred *syscall.Ucred) (int, error) {
+func createOrOpen(req *ga.OpenOp, ucred *syscall.Ucred) (int32, error) {
 	flags := int(req.GetFlags())
-	if (ucred != nil) && (flags&os.O_CREATE != 0) {
-		// First try to create a new file if it doesn't exist
-		fd, err := unix.Open(req.GetPath(), flags|os.O_EXCL, uint32(req.GetMode()))
-		if err == nil {
-			// Change the owner of the file to be the user
-			if chownErr := os.Chown(req.GetPath(), int(ucred.Uid), int(ucred.Gid)); chownErr != nil {
-				log.Printf("Failed to chown newly created file to user: %s", chownErr)
-			}
-			log.Printf("Created %s and chowned to %d", req.GetPath(), ucred.Uid)
-			return fd, err
-		}
-		if flags&os.O_EXCL != 0 {
-			// If the original call was with O_EXCL then there's no need to retry
-			return fd, err
-		}
-	}
-	return unix.Open(req.GetPath(), flags, uint32(req.GetMode()))
+	return ga.OpenNoLinks(req.GetPath(), flags, uint32(req.GetMode()))
 }
 
 func handleOpen(req *ga.OpenOp, ucred *syscall.Ucred) *ga.ElevationResponse {
 	fd, err := createOrOpen(req, ucred)
 	if err != nil {
-		return &ga.ElevationResponse{Result: -int32(err.(syscall.Errno))}
+		log.Printf("Failed to open: %s", err)
+		return &ga.ElevationResponse{Result: fd}
 	}
-	return &ga.ElevationResponse{IsResultFd: true, Result: int32(fd)}
+	return &ga.ElevationResponse{IsResultFd: true, Result: fd}
 }
 
 func handleUnlink(req *ga.UnlinkOp) *ga.ElevationResponse {
