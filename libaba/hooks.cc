@@ -19,51 +19,87 @@
 namespace guardian_agent {
 
 namespace fs = std::experimental::filesystem;
+namespace proto = google::protobuf;
 
 static const char* AGENT_GUARD_SOCK_NAME = ".agent-guard-sock";
 static const char* GUARDO_SOCK_NAME = ".guardo-sock";
 
-std::string relative_to_absolute_path(int parent_fd, const fs::path& path)
-{
-    if (!path.is_relative()){
-        return path;
+
+std::unique_ptr<FileDescriptor> marshal_fds(Operation* op, std::vector<int>* fds) {
+    std::unique_ptr<FileDescriptor> fd_cwd;
+    const proto::Reflection* reflection = op->GetReflection();
+    const proto::FieldDescriptor* op_oneof_field_desc = 
+        reflection->GetOneofFieldDescriptor(*op, op->GetDescriptor()->FindOneofByName("op"));
+    proto::Message* oneof_field_msg = reflection->MutableMessage(op, op_oneof_field_desc);
+    if (op_oneof_field_desc == NULL) {
+        return fd_cwd;
     }
-    fs::path base_dir;
-    if (parent_fd == AT_FDCWD) {
-        base_dir = fs::current_path();
-    } else {
-        base_dir = fs::read_symlink(fs::path("/proc/self/fd") / std::to_string(parent_fd));
-    } 
-    return base_dir / path;
+    const proto::Descriptor* op_msg_desc = op_oneof_field_desc->message_type();
+    for (int i = 0; i < op_msg_desc->field_count(); ++i) {
+        const proto::FieldDescriptor* subfield_desc = op_msg_desc->field(i);
+        const proto::Descriptor* subfield_msg_desc = subfield_desc->message_type();
+        if (subfield_msg_desc == NULL) {
+            continue;
+        }
+        if (subfield_msg_desc->name() == "Path") {
+            Path* path = (Path*)oneof_field_msg->GetReflection()->MutableMessage(oneof_field_msg, subfield_desc);
+            if (path->base_dir_fd() == 0) {
+                continue;
+            }
+            if (!fs::path(path->file_path()).is_relative()){
+                continue;
+            }
+
+            if (path->base_dir_fd() == AT_FDCWD) {
+                if (!fd_cwd) {
+                    fd_cwd = std::make_unique<FileDescriptor>(openat(AT_FDCWD, ".", O_RDONLY, 0));
+                    if (fd_cwd->fd_num() < 0) {
+                        throw unix_error("Failed to duplicate AT_FDCWD");
+                    }
+                }
+                fds->push_back(fd_cwd->fd_num());
+                path->set_base_dir_path(fs::current_path());
+            } else {
+                fds->push_back(path->base_dir_fd());
+                path->set_base_dir_path(fs::read_symlink(fs::path("/proc/self/fd") / std::to_string(path->base_dir_fd())));
+            }
+        }
+    }
+
+    return fd_cwd;
 }
 
-void create_open_op(int parent_fd, 
+void create_open_op(int dir_fd, 
                     const char* path, 
                     int flags,
                     int mode,
-                    OpenOp* open_op) 
+                    OpenOp* open_op)
 {
-    open_op->set_path(relative_to_absolute_path(parent_fd, path));        
     open_op->set_flags(flags);
     open_op->set_mode(mode);
+    open_op->mutable_path()->set_base_dir_fd(dir_fd);
+    open_op->mutable_path()->set_file_path(path);
 }
 
-void create_unlink_op(int parent_fd, 
+void create_unlink_op(int dir_fd, 
                       const char* path, 
                       int flags,
                       UnlinkOp* unlink_op) 
 {
-    unlink_op->set_path(relative_to_absolute_path(parent_fd, path));
+    unlink_op->mutable_path()->set_base_dir_fd(dir_fd);
+    unlink_op->mutable_path()->set_file_path(path);
     unlink_op->set_flags(flags);
 }
 
-bool create_access_op(const char* path, 
+bool create_access_op(int dir_fd, 
+                      const char* path, 
+                      int mode,
                       int flags,
                       AccessOp* access_op) 
 {
     // Don't try to elevate executable access checks for files that
     // are not executable at all. 
-    if (flags == X_OK) {
+    if (mode == X_OK) {
         auto p = fs::status(path).permissions();
         if (((p & fs::perms::owner_exec) == fs::perms::none) &&
             ((p & fs::perms::group_exec) == fs::perms::none) &&
@@ -71,8 +107,10 @@ bool create_access_op(const char* path,
             return false;
         }
     }
-    access_op->set_path(relative_to_absolute_path(AT_FDCWD, path));
-    access_op->set_mode(flags);
+    access_op->mutable_path()->set_base_dir_fd(dir_fd);
+    access_op->mutable_path()->set_file_path(path);
+    access_op->set_mode(mode);
+    access_op->set_flags(flags);
     return true;
 }
 
@@ -197,7 +235,10 @@ static void hook(long syscall_number,
             create_unlink_op((int)arg0, (char*)arg1, arg2, op.mutable_unlink());
             break;
         case SYS_access:
-            should_hook = create_access_op((char*)arg0, (int)arg1, op.mutable_access());
+            should_hook = create_access_op(AT_FDCWD, (char*)arg0, (int)arg1, 0, op.mutable_access());
+            break;
+        case SYS_faccessat:
+            should_hook = create_access_op((int)arg0, (char*)arg1, (int)arg2, (int)arg3, op.mutable_access());
             break;
         case SYS_socket:
             create_socket_op((int)arg0, (int)arg1, (int)arg2, op.mutable_socket());
@@ -230,12 +271,15 @@ static void hook(long syscall_number,
         return;
     }
 
+    auto fd_cwd = marshal_fds(&op, &fds);
+
     ElevationRequest elevation_request;
     *elevation_request.mutable_op() = op;
     *elevation_request.mutable_credential() = credential;
     socket.sendmsg(create_raw_msg(ELEVATION_REQUEST, elevation_request), fds);
 
     fds.clear();
+    
     ElevationResponse elevation_response;
     if (!read_expected_msg_with_fd(&socket, ELEVATION_RESPONSE, &elevation_response, &fds)) {
         return;

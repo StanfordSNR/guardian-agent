@@ -4,20 +4,32 @@ package guardian_agent;
 
 option go_package = "guardianagent";
 
+message Path {
+    int32 base_dir_fd = 1;
+    string base_dir_path = 2;
+
+    string file_path = 3;
+}
+
+message Socket {
+    int32 fd = 1;
+}
+
 message OpenOp {
-    string path = 1;
+    Path path = 1;
     int32 flags = 2;
     uint32 mode = 3;
 }
 
 message UnlinkOp {
-    string path = 1;
+    Path path = 1;
     int32 flags = 2;
 }
 
 message AccessOp {
-    string path = 1;
+    Path path = 1;
     uint32 mode = 2;
+    uint32 flags = 3;
 }
 
 message SocketOp {
@@ -27,7 +39,7 @@ message SocketOp {
 }
 
 message BindOp {
-    int32 sockfd = 1;
+    Socket sock = 1;
     bytes addr = 2;
 }
 

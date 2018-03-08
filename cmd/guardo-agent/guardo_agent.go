@@ -55,13 +55,9 @@ func getUcred(conn *net.UnixConn) *syscall.Ucred {
 	return cred
 }
 
-func createOrOpen(req *ga.OpenOp, ucred *syscall.Ucred) (int32, error) {
+func handleOpen(req *ga.OpenOp, dirfd *int, ucred *syscall.Ucred) *ga.ElevationResponse {
 	flags := int(req.GetFlags())
-	return ga.OpenNoLinks(req.GetPath(), flags, uint32(req.GetMode()))
-}
-
-func handleOpen(req *ga.OpenOp, ucred *syscall.Ucred) *ga.ElevationResponse {
-	fd, err := createOrOpen(req, ucred)
+	fd, err := ga.OpenNoLinks(req.GetPath().GetFilePath(), flags, uint32(req.GetMode()))
 	if err != nil {
 		log.Printf("Failed to open: %s", err)
 		return &ga.ElevationResponse{Result: fd}
@@ -69,16 +65,27 @@ func handleOpen(req *ga.OpenOp, ucred *syscall.Ucred) *ga.ElevationResponse {
 	return &ga.ElevationResponse{IsResultFd: true, Result: fd}
 }
 
-func handleUnlink(req *ga.UnlinkOp) *ga.ElevationResponse {
-	err := unix.Unlinkat(unix.AT_FDCWD, req.GetPath(), int(req.GetFlags()))
+func handleUnlink(req *ga.UnlinkOp, dirfd *int) *ga.ElevationResponse {
+	var err error
+	if dirfd == nil {
+		err = unix.Unlinkat(unix.AT_FDCWD, req.GetPath().GetFilePath(), int(req.GetFlags()))
+	} else {
+		err = unix.Unlinkat(*dirfd, req.GetPath().GetFilePath(), int(req.GetFlags()))
+	}
+
 	if err != nil {
 		return &ga.ElevationResponse{Result: -int32(err.(syscall.Errno))}
 	}
 	return &ga.ElevationResponse{Result: 0}
 }
 
-func handleAccess(req *ga.AccessOp) *ga.ElevationResponse {
-	err := unix.Access(req.GetPath(), req.GetMode())
+func handleAccess(req *ga.AccessOp, dirfd *int) *ga.ElevationResponse {
+	var err error
+	if dirfd == nil {
+		err = unix.Faccessat(unix.AT_FDCWD, req.GetPath().GetFilePath(), req.GetMode(), int(req.GetFlags()))
+	} else {
+		err = unix.Faccessat(*dirfd, req.GetPath().GetFilePath(), req.GetMode(), int(req.GetFlags()))
+	}
 	if err != nil {
 		return &ga.ElevationResponse{Result: -int32(err.(syscall.Errno))}
 	}
@@ -93,8 +100,11 @@ func handleSocket(req *ga.SocketOp) *ga.ElevationResponse {
 	return &ga.ElevationResponse{IsResultFd: true, Result: int32(fd)}
 }
 
-func handleBind(req *ga.BindOp) *ga.ElevationResponse {
-	_, _, err := syscall.Syscall(syscall.SYS_BIND, uintptr(req.GetSockfd()), uintptr(unsafe.Pointer(&req.GetAddr()[0])), uintptr(len(req.GetAddr())))
+func handleBind(req *ga.BindOp, fd *int) *ga.ElevationResponse {
+	if fd == nil {
+		return &ga.ElevationResponse{Result: -int32(unix.EBADF)}
+	}
+	_, _, err := syscall.Syscall(syscall.SYS_BIND, uintptr(*fd), uintptr(unsafe.Pointer(&req.GetAddr()[0])), uintptr(len(req.GetAddr())))
 	if err != 0 {
 		return &ga.ElevationResponse{Result: -int32(err)}
 	}
@@ -274,16 +284,15 @@ func (guardo *guardoAgent) handleConnection(c *net.UnixConn) error {
 
 	switch op := op.Op.(type) {
 	case *ga.Operation_Open:
-		resp = handleOpen(op.Open, ucred)
+		resp = handleOpen(op.Open, fd, ucred)
 	case *ga.Operation_Unlink:
-		resp = handleUnlink(op.Unlink)
+		resp = handleUnlink(op.Unlink, fd)
 	case *ga.Operation_Access:
-		resp = handleAccess(op.Access)
+		resp = handleAccess(op.Access, fd)
 	case *ga.Operation_Socket:
 		resp = handleSocket(op.Socket)
 	case *ga.Operation_Bind:
-		op.Bind.Sockfd = int32(*fd)
-		resp = handleBind(op.Bind)
+		resp = handleBind(op.Bind, fd)
 	default:
 		return fmt.Errorf("Unknown sycall request type")
 	}
@@ -382,6 +391,7 @@ func main() {
 			if err = guardo.handleConnection(c); err != nil {
 				fmt.Fprintf(os.Stderr, "%v\n", err)
 			}
+			c.Close()
 		}()
 	}
 }
