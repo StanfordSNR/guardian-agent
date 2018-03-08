@@ -27,30 +27,13 @@ static const char* GUARDO_SOCK_NAME = ".guardo-sock";
 
 std::unique_ptr<FileDescriptor> marshal_fds(Operation* op, std::vector<int>* fds) {
     std::unique_ptr<FileDescriptor> fd_cwd;
-    const proto::Reflection* reflection = op->GetReflection();
-    const proto::FieldDescriptor* op_oneof_field_desc = 
-        reflection->GetOneofFieldDescriptor(*op, op->GetDescriptor()->FindOneofByName("op"));
-    proto::Message* oneof_field_msg = reflection->MutableMessage(op, op_oneof_field_desc);
-    if (op_oneof_field_desc == NULL) {
-        return fd_cwd;
-    }
-    const proto::Descriptor* op_msg_desc = op_oneof_field_desc->message_type();
-    for (int i = 0; i < op_msg_desc->field_count(); ++i) {
-        const proto::FieldDescriptor* subfield_desc = op_msg_desc->field(i);
-        const proto::Descriptor* subfield_msg_desc = subfield_desc->message_type();
-        if (subfield_msg_desc == NULL) {
-            continue;
-        }
-        if (subfield_msg_desc->name() == "Path") {
-            Path* path = (Path*)oneof_field_msg->GetReflection()->MutableMessage(oneof_field_msg, subfield_desc);
-            if (path->base_dir_fd() == 0) {
+    for (auto& arg : *op->mutable_args()) {
+        if (arg.has_dir_fd_arg()) {
+            DirFd* dir_fd = arg.mutable_dir_fd_arg();
+            if (dir_fd->form_case() != DirFd::kFd) {
                 continue;
             }
-            if (!fs::path(path->file_path()).is_relative()){
-                continue;
-            }
-
-            if (path->base_dir_fd() == AT_FDCWD) {
+            if (dir_fd->fd() == AT_FDCWD) {
                 if (!fd_cwd) {
                     fd_cwd = std::make_unique<FileDescriptor>(openat(AT_FDCWD, ".", O_RDONLY, 0));
                     if (fd_cwd->fd_num() < 0) {
@@ -58,12 +41,16 @@ std::unique_ptr<FileDescriptor> marshal_fds(Operation* op, std::vector<int>* fds
                     }
                 }
                 fds->push_back(fd_cwd->fd_num());
-                path->set_base_dir_path(fs::current_path());
+                dir_fd->set_path(fs::current_path());
             } else {
-                fds->push_back(path->base_dir_fd());
-                path->set_base_dir_path(fs::read_symlink(fs::path("/proc/self/fd") / std::to_string(path->base_dir_fd())));
+                fds->push_back(dir_fd->fd());
+                dir_fd->set_path(fs::read_symlink(fs::path("/proc/self/fd") / std::to_string(dir_fd->fd())));
             }
-        }
+        } else if (arg.has_socket_arg()) {
+            Socket* sock = arg.mutable_socket_arg();
+            fds->push_back(sock->fd());
+            sock->clear_fd();
+        }   
     }
 
     return fd_cwd;
@@ -73,29 +60,29 @@ void create_open_op(int dir_fd,
                     const char* path, 
                     int flags,
                     int mode,
-                    OpenOp* open_op)
+                    Operation* op)
 {
-    open_op->set_flags(flags);
-    open_op->set_mode(mode);
-    open_op->mutable_path()->set_base_dir_fd(dir_fd);
-    open_op->mutable_path()->set_file_path(path);
+    op->add_args()->mutable_dir_fd_arg()->set_fd(dir_fd);
+    op->add_args()->set_string_arg(path);
+    op->add_args()->set_int_arg(flags);
+    op->add_args()->set_int_arg(mode);
 }
 
 void create_unlink_op(int dir_fd, 
                       const char* path, 
                       int flags,
-                      UnlinkOp* unlink_op) 
+                      Operation* op) 
 {
-    unlink_op->mutable_path()->set_base_dir_fd(dir_fd);
-    unlink_op->mutable_path()->set_file_path(path);
-    unlink_op->set_flags(flags);
+    op->add_args()->mutable_dir_fd_arg()->set_fd(dir_fd);
+    op->add_args()->set_string_arg(path);
+    op->add_args()->set_int_arg(flags);
 }
 
 bool create_access_op(int dir_fd, 
                       const char* path, 
                       int mode,
                       int flags,
-                      AccessOp* access_op) 
+                      Operation* op) 
 {
     // Don't try to elevate executable access checks for files that
     // are not executable at all. 
@@ -107,25 +94,25 @@ bool create_access_op(int dir_fd,
             return false;
         }
     }
-    access_op->mutable_path()->set_base_dir_fd(dir_fd);
-    access_op->mutable_path()->set_file_path(path);
-    access_op->set_mode(mode);
-    access_op->set_flags(flags);
+    op->add_args()->mutable_dir_fd_arg()->set_fd(dir_fd);
+    op->add_args()->set_string_arg(path);
+    op->add_args()->set_int_arg(mode);
+    op->add_args()->set_int_arg(flags);
     return true;
 }
 
-void create_socket_op(int domain, int type, int protocol, SocketOp* socket_op)
+void create_socket_op(int domain, int type, int protocol, Operation* op)
 {
-    socket_op->set_domain(domain);
-    socket_op->set_type(type);
-    socket_op->set_protocol(protocol);
+    op->add_args()->set_int_arg(domain);
+    op->add_args()->set_int_arg(type);
+    op->add_args()->set_int_arg(protocol);
 }
 
 void create_bind_op(int sockfd, const struct sockaddr *addr, socklen_t addrlen, 
-                    BindOp* bind_op, std::vector<int>* fds)
+                    Operation* op)
 {
-    bind_op->set_addr(std::string((const char*)addr, addrlen));
-    fds->push_back(sockfd);
+    op->add_args()->mutable_socket_arg()->set_fd(sockfd);
+    op->add_args()->set_bytes_arg(std::string((const char*)addr, addrlen));
 }
 
 
@@ -220,31 +207,32 @@ static void hook(long syscall_number,
     Operation op;
     std::vector<int> fds;
     bool should_hook = true;
+    op.set_syscall_num(syscall_number);
     switch (syscall_number) {
 	// Must be in sync with switch statement in 'safe_hook' below.
         case SYS_open: 
-            create_open_op(AT_FDCWD, (char*)arg0, arg1, arg2, op.mutable_open());
+            create_open_op(AT_FDCWD, (char*)arg0, arg1, arg2, &op);
             break;
         case SYS_openat:
-            create_open_op((int)arg0, (char*)arg1, arg2, arg3, op.mutable_open());
+            create_open_op((int)arg0, (char*)arg1, arg2, arg3, &op);
             break;
         case SYS_unlink:
-            create_unlink_op(AT_FDCWD, (char*)arg0, 0, op.mutable_unlink());
+            create_unlink_op(AT_FDCWD, (char*)arg0, 0, &op);
             break;
         case SYS_unlinkat:
-            create_unlink_op((int)arg0, (char*)arg1, arg2, op.mutable_unlink());
+            create_unlink_op((int)arg0, (char*)arg1, arg2, &op);
             break;
         case SYS_access:
-            should_hook = create_access_op(AT_FDCWD, (char*)arg0, (int)arg1, 0, op.mutable_access());
+            should_hook = create_access_op(AT_FDCWD, (char*)arg0, (int)arg1, 0, &op);
             break;
         case SYS_faccessat:
-            should_hook = create_access_op((int)arg0, (char*)arg1, (int)arg2, (int)arg3, op.mutable_access());
+            should_hook = create_access_op((int)arg0, (char*)arg1, (int)arg2, (int)arg3, &op);
             break;
         case SYS_socket:
-            create_socket_op((int)arg0, (int)arg1, (int)arg2, op.mutable_socket());
+            create_socket_op((int)arg0, (int)arg1, (int)arg2, &op);
             break;
         case SYS_bind:
-            create_bind_op((int)arg0, (sockaddr*)arg1, (socklen_t)arg2, op.mutable_bind(), &fds);
+            create_bind_op((int)arg0, (sockaddr*)arg1, (socklen_t)arg2, &op);
             break;
         default:
             std::cerr << "Error: unexpected intercepted syscall: " << syscall_number << std::endl;
@@ -254,6 +242,8 @@ static void hook(long syscall_number,
     if (!should_hook) {
         return;
     }
+
+    auto fd_cwd = marshal_fds(&op, &fds);
 
     UnixSocket socket;
     socket.connect(Address::NewUnixAddress(fs::path("/tmp") / GUARDO_SOCK_NAME));    
@@ -270,8 +260,6 @@ static void hook(long syscall_number,
     if (!get_credential(op, challenge, &credential)) {
         return;
     }
-
-    auto fd_cwd = marshal_fds(&op, &fds);
 
     ElevationRequest elevation_request;
     *elevation_request.mutable_op() = op;

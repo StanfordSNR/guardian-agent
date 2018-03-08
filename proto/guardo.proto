@@ -4,53 +4,29 @@ package guardian_agent;
 
 option go_package = "guardianagent";
 
-message Path {
-    int32 base_dir_fd = 1;
-    string base_dir_path = 2;
-
-    string file_path = 3;
+message DirFd {
+    oneof form {
+        int32 fd = 1;
+        string path = 2;
+    }
 }
-
 message Socket {
     int32 fd = 1;
 }
 
-message OpenOp {
-    Path path = 1;
-    int32 flags = 2;
-    uint32 mode = 3;
-}
-
-message UnlinkOp {
-    Path path = 1;
-    int32 flags = 2;
-}
-
-message AccessOp {
-    Path path = 1;
-    uint32 mode = 2;
-    uint32 flags = 3;
-}
-
-message SocketOp {
-    int32 domain = 1;
-    int32 type = 2;
-    int32 protocol = 3;
-}
-
-message BindOp {
-    Socket sock = 1;
-    bytes addr = 2;
+message Argument {
+    oneof arg {
+        int32 int_arg = 1;
+        string string_arg = 2;
+        DirFd dir_fd_arg = 3;
+        Socket socket_arg = 4;
+        bytes bytes_arg = 5;
+    }
 }
 
 message Operation {
-    oneof op {
-        OpenOp open = 1;
-        UnlinkOp unlink = 2;
-        AccessOp access = 3;
-        SocketOp socket = 4;
-        BindOp bind = 5;
-    }
+    int32 syscall_num = 1;
+    repeated Argument args = 2;
 }
 
 message CredentialRequest {
