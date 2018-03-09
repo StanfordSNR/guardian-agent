@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"path/filepath"
 	"reflect"
 	"syscall"
 	"unsafe"
@@ -56,8 +57,32 @@ func getUcred(conn *net.UnixConn) *syscall.Ucred {
 	return cred
 }
 
+func verifyFileDescriptorPath(fd int, path string) error {
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("DirFd path must be absolute")
+	}
+	pathFD, err := ga.OpenNoLinks(unix.AT_FDCWD, path, unix.O_NOFOLLOW|unix.O_DIRECTORY, 0)
+	if err != nil {
+		return err
+	}
+	var statPath unix.Stat_t
+	err = unix.Fstat(int(pathFD), &statPath)
+	if err != nil {
+		return errors.Wrapf(err, "Cannot stat %s", path)
+	}
+	var statFd unix.Stat_t
+	err = unix.Fstat(int(fd), &statFd)
+	if err != nil {
+		return errors.Wrapf(err, "Cannot stat fd")
+	}
+	if statPath.Dev == statFd.Dev && statPath.Ino == statFd.Ino {
+		return nil
+	}
+	return fmt.Errorf("File descriptor and path differ")
+}
+
 func handleOpen(dirFd *ga.DirFd, path string, flags int32, mode int32) *ga.ElevationResponse {
-	fd, err := ga.OpenNoLinks(path, int(flags), uint32(mode))
+	fd, err := ga.OpenNoLinks(int(dirFd.GetFd()), path, int(flags), uint32(mode))
 	if err != nil {
 		log.Printf("Failed to open: %s", err)
 		return &ga.ElevationResponse{Result: fd}
@@ -272,6 +297,9 @@ func (guardo *guardoAgent) handleConnection(c *net.UnixConn) error {
 	for _, arg := range op.Args {
 		switch arg := arg.Arg.(type) {
 		case *ga.Argument_DirFdArg:
+			if err = verifyFileDescriptorPath(*fd, arg.DirFdArg.GetPath()); err != nil {
+				return fmt.Errorf("FD does not match path: %s: %s", arg.DirFdArg.GetPath(), err)
+			}
 			arg.DirFdArg.Form = &ga.DirFd_Fd{Fd: int32(*fd)}
 			argList = append(argList, reflect.ValueOf(arg.DirFdArg))
 		case *ga.Argument_SocketArg:
@@ -284,7 +312,6 @@ func (guardo *guardoAgent) handleConnection(c *net.UnixConn) error {
 		case *ga.Argument_BytesArg:
 			argList = append(argList, reflect.ValueOf(arg.BytesArg))
 		}
-
 	}
 
 	handler := handlerRegistry[op.SyscallNum]

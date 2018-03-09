@@ -10,19 +10,12 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func OpenNoLinks(path string, flags int, mode uint32) (int32, error) {
-	if !filepath.IsAbs(path) {
-		return -int32(syscall.EINVAL), fmt.Errorf("Path %s is not absolute", path)
-	}
-	dirFD := unix.AT_FDCWD
-	defer func() {
-		if dirFD != unix.AT_FDCWD {
-			syscall.Close(dirFD)
-		}
-	}()
-
+func OpenNoLinks(dirFD int, path string, flags int, mode uint32) (int32, error) {
 	var stat unix.Stat_t
-	parts := append([]string{"/"}, strings.Split(path, "/")...)
+	parts := strings.Split(path, "/")
+	if filepath.IsAbs(path) {
+		parts = append([]string{"/"}, parts...)
+	}
 	for len(parts) > 0 {
 		part := parts[0]
 		parts = parts[1:]
@@ -41,9 +34,6 @@ func OpenNoLinks(path string, flags int, mode uint32) (int32, error) {
 		if err != nil {
 			return -int32(err.(syscall.Errno)), errors.Wrapf(err, "Failed to openat %s", part)
 		}
-		if dirFD != unix.AT_FDCWD {
-			syscall.Close(dirFD)
-		}
 		dirFD = childFD
 
 		err = unix.Fstat(dirFD, &stat)
@@ -51,13 +41,16 @@ func OpenNoLinks(path string, flags int, mode uint32) (int32, error) {
 			return -int32(err.(syscall.Errno)), errors.Wrapf(err, "Cannot stat %s", part)
 		}
 
-		if flags&syscall.O_NOFOLLOW == 0 && stat.Mode&syscall.S_IFMT == syscall.S_IFLNK {
+		if !(flags&syscall.O_NOFOLLOW != 0 && len(parts) == 0) && stat.Mode&syscall.S_IFMT == syscall.S_IFLNK {
 			return -int32(syscall.ELOOP), fmt.Errorf("Path contains disallowed symlink %s: %s", path, part)
+		}
+
+		if len(parts) != 0 {
+			defer unix.Close(dirFD)
 		}
 	}
 
 	result := int32(dirFD)
-	dirFD = -1
 	return result, nil
 }
 
