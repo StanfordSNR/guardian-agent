@@ -1,7 +1,6 @@
 package guardianagent
 
 import (
-	"fmt"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -10,48 +9,79 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func OpenNoLinks(dirFD int, path string, flags int, mode uint32) (int32, error) {
-	var stat unix.Stat_t
+func split(path string) (base string, last string) {
+	for ; strings.HasSuffix(path, "//"); path = path[0 : len(path)-1] {
+	}
+	last = path[strings.LastIndex(path[0:len(path)-1], "/")+1:]
+	base = path[0 : len(path)-len(last)]
+	return
+}
+
+func OpenNoFollow(dirFD int, path string, flags int, mode uint32) (int, error) {
+	base, last := split(path)
+	dirFD, err := OpenDirNoFollow(dirFD, base)
+	if err != nil {
+		return -1, err
+	}
+	defer unix.Close(dirFD)
+
+	openFlags := flags | syscall.O_NOFOLLOW
+	childFD, err := unix.Openat(dirFD, last, openFlags, mode)
+	if err != nil {
+		return -1, err
+	}
+	return childFD, nil
+}
+
+func UnlinkNoFollow(dirFD int, path string, flags int) error {
+	base, last := split(path)
+	dirFD, err := OpenDirNoFollow(dirFD, base)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(dirFD)
+
+	return unix.Unlinkat(dirFD, last, flags)
+}
+
+func AccessNoFollow(dirFD int, path string, mode uint32, flags int) error {
+	base, last := split(path)
+	dirFD, err := OpenDirNoFollow(dirFD, base)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(dirFD)
+
+	return unix.Faccessat(dirFD, last, mode, flags)
+}
+
+func OpenDirNoFollow(dirFD int, path string) (int, error) {
 	parts := strings.Split(path, "/")
 	if filepath.IsAbs(path) {
 		parts = append([]string{"/"}, parts...)
+	} else if path == "" {
+		parts = append([]string{"."}, parts...)
 	}
+	first := true
 	for len(parts) > 0 {
 		part := parts[0]
 		parts = parts[1:]
 
 		if part == "" {
-			part = "."
+			continue
 		}
 
-		openFlags := flags | syscall.O_NOFOLLOW
-		if len(parts) != 0 {
-			//  not last path component
-			openFlags = openFlags | unix.O_DIRECTORY | unix.O_PATH
+		childFD, err := unix.Openat(dirFD, part, unix.O_NOFOLLOW|unix.O_DIRECTORY|unix.O_PATH, 0)
+		if !first {
+			unix.Close(dirFD)
+			first = false
 		}
-
-		childFD, err := unix.Openat(dirFD, part, openFlags, mode)
 		if err != nil {
-			return -int32(err.(syscall.Errno)), errors.Wrapf(err, "Failed to openat %s", part)
+			return -1, errors.Wrapf(err, "Failed to openat base dir component: %s", part)
 		}
 		dirFD = childFD
-
-		err = unix.Fstat(dirFD, &stat)
-		if err != nil {
-			return -int32(err.(syscall.Errno)), errors.Wrapf(err, "Cannot stat %s", part)
-		}
-
-		if !(flags&syscall.O_NOFOLLOW != 0 && len(parts) == 0) && stat.Mode&syscall.S_IFMT == syscall.S_IFLNK {
-			return -int32(syscall.ELOOP), fmt.Errorf("Path contains disallowed symlink %s: %s", path, part)
-		}
-
-		if len(parts) != 0 {
-			defer unix.Close(dirFD)
-		}
 	}
-
-	result := int32(dirFD)
-	return result, nil
+	return dirFD, nil
 }
 
 /**
