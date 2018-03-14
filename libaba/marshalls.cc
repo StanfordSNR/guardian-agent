@@ -46,6 +46,29 @@ private:
     long int* result;
 };
 
+class OutBufferProcessor : public ResultProcessor 
+{
+public:
+    OutBufferProcessor(void* buffer, size_t buffer_size)
+    : buf(buffer), count(buffer_size) {}
+
+    bool Process(const Argument& arg)
+    {
+        if (arg.arg_case() != Argument::kBytesArg) {
+            return false;
+        }
+        if (arg.bytes_arg().size() > count) {
+            return false;
+        }
+        memcpy(buf, arg.bytes_arg().data(), arg.bytes_arg().size());
+        return true;
+    }
+
+private:
+    void* buf;
+    size_t count;
+};
+
 SyscallMarshall* SyscallMarshall::New(long syscall_number, long arg0, long arg1, long arg2, long arg3, long arg4, long arg5, long int* result)
 {
     auto factory_func = registry.find((int)syscall_number);
@@ -227,6 +250,63 @@ public:
     }
 };
 REGISTER_SYSCALL_MARSHAL(SYS_access, AccessMarshall)
+
+class FstatAtMarshall : public SyscallMarshall 
+{
+public:
+    void Prepare() 
+    {
+        args.Add()->mutable_dir_fd_arg()->set_fd(arg0);
+        args.Add()->set_string_arg((char*)arg1);
+        args.Add()->mutable_out_buffer_arg()->set_len(sizeof(stat));
+        args.Add()->set_int_arg(arg3);
+        result_processors.push_back(
+            std::unique_ptr<ResultProcessor>(new OutBufferProcessor((void*)arg2, sizeof(stat))));
+    }
+};
+REGISTER_SYSCALL_MARSHAL(SYS_newfstatat, FstatAtMarshall)
+
+class StatMarshall : public FstatAtMarshall 
+{
+public:
+    void Prepare() 
+    {
+        arg3 = 0;
+        arg2 = arg1;
+        arg1 = arg0;
+        arg0 = AT_FDCWD;
+        FstatAtMarshall::Prepare();
+    }
+};
+REGISTER_SYSCALL_MARSHAL(SYS_stat, StatMarshall)
+
+class LstatMarshall : public FstatAtMarshall 
+{
+public:
+    void Prepare() 
+    {
+        arg3 = AT_SYMLINK_NOFOLLOW;
+        arg2 = arg1;
+        arg1 = arg0;
+        arg0 = AT_FDCWD;
+        FstatAtMarshall::Prepare();
+    }
+};
+REGISTER_SYSCALL_MARSHAL(SYS_lstat, LstatMarshall)
+
+class FstatMarshall : public SyscallMarshall 
+{
+public:
+    void Prepare() 
+    {
+        args.Add()->mutable_fd_arg()->set_fd(arg0);
+        args.Add()->mutable_out_buffer_arg()->set_len(sizeof(stat));
+        result_processors.push_back(
+            std::unique_ptr<ResultProcessor>(new OutBufferProcessor((void*)arg1, sizeof(stat))));
+    }
+};
+REGISTER_SYSCALL_MARSHAL(SYS_fstat, FstatMarshall)
+
 
 class SocketMarshall : public SyscallMarshall 
 {

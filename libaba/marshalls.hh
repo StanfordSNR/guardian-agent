@@ -37,8 +37,6 @@ protected:
     std::vector<std::unique_ptr<ResultProcessor>> result_processors;
 };
 
-
-
 }  // namespace guardian_agent
 
 #endif /* MARSHALLS_HH */

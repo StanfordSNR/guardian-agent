@@ -105,6 +105,10 @@ func handleAccess(dirFd *ga.DirFd, path string, mode int32, flags int32) error {
 	return ga.AccessNoFollow(int(dirFd.GetFd()), path, uint32(mode), int(flags))
 }
 
+func handleStat(dirFd *ga.DirFd, path string, statbuf []byte, flags int32) error {
+	return ga.StatNoFollow(int(dirFd.GetFd()), path, (*unix.Stat_t)(unsafe.Pointer(&statbuf[0])), int(flags))
+}
+
 func handleSocket(domain int32, typeArg int32, protocol int32) (*ga.Fd, error) {
 	fd, err := unix.Socket(int(domain), int(typeArg), int(protocol))
 	if err != nil {
@@ -158,6 +162,7 @@ func writeElevationResponse(c *net.UnixConn, resp *ga.ElevationResponse, fds []i
 	if err != nil {
 		return fmt.Errorf("Failed to Marshal response %s: %s", resp, err)
 	}
+
 	binary.BigEndian.PutUint32(header, uint32(len(data)+1))
 	header[4] = byte(ga.MsgNum_ELEVATION_RESPONSE)
 	rights := unix.UnixRights(fds...)
@@ -283,6 +288,7 @@ func (guardo *guardoAgent) getRequestHandler(op *ga.Operation, fd *int) (func() 
 	log.Printf("Requested operation: %s\n", op)
 
 	argList := []reflect.Value{}
+	results := []reflect.Value{}
 	for _, arg := range op.Args {
 		switch arg := arg.Arg.(type) {
 		case *ga.Argument_DirFdArg:
@@ -300,6 +306,10 @@ func (guardo *guardoAgent) getRequestHandler(op *ga.Operation, fd *int) (func() 
 			argList = append(argList, reflect.ValueOf(arg.StringArg))
 		case *ga.Argument_BytesArg:
 			argList = append(argList, reflect.ValueOf(arg.BytesArg))
+		case *ga.Argument_OutBufferArg:
+			outBuffer := reflect.ValueOf(make([]byte, arg.OutBufferArg.Len))
+			argList = append(argList, outBuffer)
+			results = append(results, outBuffer)
 		}
 	}
 
@@ -328,12 +338,14 @@ func (guardo *guardoAgent) getRequestHandler(op *ga.Operation, fd *int) (func() 
 		resp = &ga.ElevationResponse{}
 		fds = []int{}
 
-		results := reflect.ValueOf(handler).Call(argList)
-		if !results[len(results)-1].IsNil() {
-			resp.ErrnoCode = int32(results[len(results)-1].Interface().(syscall.Errno))
+		retvals := reflect.ValueOf(handler).Call(argList)
+		if !retvals[len(retvals)-1].IsNil() {
+			resp.ErrnoCode = int32(retvals[len(retvals)-1].Interface().(syscall.Errno))
 		}
 
-		for _, result := range results[0 : len(results)-1] {
+		results = append(retvals[0:len(retvals)-1], results...)
+
+		for _, result := range results {
 			switch result.Type() {
 			case reflect.TypeOf(&ga.Fd{}):
 				resp.Results = append(resp.Results, &ga.Argument{&ga.Argument_FdArg{result.Interface().(*ga.Fd)}})
@@ -342,6 +354,8 @@ func (guardo *guardoAgent) getRequestHandler(op *ga.Operation, fd *int) (func() 
 			case reflect.TypeOf(int32(0)):
 				resp.Results = append(resp.Results, &ga.Argument{&ga.Argument_IntArg{int32(result.Int())}})
 				break
+			case reflect.TypeOf([]byte{}):
+				resp.Results = append(resp.Results, &ga.Argument{&ga.Argument_BytesArg{result.Bytes()}})
 			}
 		}
 
@@ -350,19 +364,22 @@ func (guardo *guardoAgent) getRequestHandler(op *ga.Operation, fd *int) (func() 
 }
 
 var handlerRegistry = map[int32]interface{}{
-	syscall.SYS_OPENAT:    handleOpen,
-	syscall.SYS_OPEN:      handleOpen,
-	syscall.SYS_SYMLINK:   handleSymlink,
-	syscall.SYS_SYMLINKAT: handleSymlink,
-	syscall.SYS_UNLINK:    handleUnlink,
-	syscall.SYS_UNLINKAT:  handleUnlink,
-	syscall.SYS_MKDIR:     handleMkdir,
-	syscall.SYS_MKDIRAT:   handleMkdir,
-	syscall.SYS_RMDIR:     handleUnlink,
-	syscall.SYS_ACCESS:    handleAccess,
-	syscall.SYS_FACCESSAT: handleAccess,
-	syscall.SYS_SOCKET:    handleSocket,
-	syscall.SYS_BIND:      handleBind,
+	syscall.SYS_OPENAT:     handleOpen,
+	syscall.SYS_OPEN:       handleOpen,
+	syscall.SYS_SYMLINK:    handleSymlink,
+	syscall.SYS_SYMLINKAT:  handleSymlink,
+	syscall.SYS_UNLINK:     handleUnlink,
+	syscall.SYS_UNLINKAT:   handleUnlink,
+	syscall.SYS_MKDIR:      handleMkdir,
+	syscall.SYS_MKDIRAT:    handleMkdir,
+	syscall.SYS_RMDIR:      handleUnlink,
+	syscall.SYS_ACCESS:     handleAccess,
+	syscall.SYS_FACCESSAT:  handleAccess,
+	syscall.SYS_SOCKET:     handleSocket,
+	syscall.SYS_BIND:       handleBind,
+	syscall.SYS_NEWFSTATAT: handleStat,
+	syscall.SYS_LSTAT:      handleStat,
+	syscall.SYS_STAT:       handleStat,
 }
 
 func main() {

@@ -100,7 +100,7 @@ bool read_expected_msg(FileDescriptor* fd, const unsigned char expected_msg_num,
         return false;
     }
     if (!msg->ParseFromString(packet.substr(1))) {
-        std::cerr << "Failed to parse msg " << expected_msg_num << " from string" << std::endl;
+        std::cerr << "Failed to parse msg " << int(expected_msg_num) << " from string" << std::endl;
         return false;
     }
     return true;
@@ -108,20 +108,21 @@ bool read_expected_msg(FileDescriptor* fd, const unsigned char expected_msg_num,
 
 bool read_expected_msg_with_fd(UnixSocket* socket, const unsigned char expected_msg_num, google::protobuf::MessageLite* msg, std::vector<int>* fds) 
 {
-    std::string response_data = socket->recvmsg(fds);
-    int payload_size = ntohl(*(int*)response_data.data());
-    if (response_data.size() != (sizeof(int) + payload_size)) {
-        std::cerr << "Error: enexpected data size: " << response_data.size()  
+    std::string packet = socket->recvmsg(fds);
+    int payload_size = ntohl(*(int*)packet.data());
+    if (packet.size() != (sizeof(int) + payload_size)) {
+        std::cerr << "Error: enexpected packet size: " << packet.size()  
             << " payload size: " << payload_size << std::endl;
         return false;
     }
-    unsigned char msg_num = *(response_data.data() + sizeof(payload_size));
+    unsigned char msg_num = *(packet.data() + sizeof(payload_size));
     if (msg_num != expected_msg_num) {
         std::cerr << "Invalid msg_num, expected: " << expected_msg_num << ", got: " << msg_num << std::endl;
         return false;
     }
-    if (!msg->ParseFromString(response_data.data() + sizeof(payload_size) + sizeof(msg_num))) {
-        std::cerr << "Error: failed to parse msg:" << msg_num << std::endl;
+    if (!msg->ParseFromString(
+            packet.substr(sizeof(payload_size) + sizeof(msg_num)))) {
+        std::cerr << "Error: failed to parse msg:" << int(msg_num) << std::endl;
         return false;
     }
     return true;
