@@ -1,5 +1,6 @@
 #include "guardo.pb.h"
 #include "guardian_agent.pb.h"
+#include "marshalls.hh"
 #include "socket.hh"
 #include "util.hh"
 
@@ -46,75 +47,30 @@ std::unique_ptr<FileDescriptor> marshal_fds(Operation* op, std::vector<int>* fds
                 fds->push_back(dir_fd->fd());
                 dir_fd->set_path(fs::read_symlink(fs::path("/proc/self/fd") / std::to_string(dir_fd->fd())));
             }
-        } else if (arg.has_socket_arg()) {
-            Socket* sock = arg.mutable_socket_arg();
-            fds->push_back(sock->fd());
-            sock->clear_fd();
+        } else if (arg.has_fd_arg()) {
+            Fd* fd = arg.mutable_fd_arg();
+            fds->push_back(fd->fd());
+            fd->clear_fd();
         }   
     }
 
     return fd_cwd;
 }
 
-void create_open_op(int dir_fd, 
-                    const char* path, 
-                    int flags,
-                    int mode,
-                    Operation* op)
+bool unmarshal_fds(ElevationResponse* response, const std::vector<int> fds) 
 {
-    op->add_args()->mutable_dir_fd_arg()->set_fd(dir_fd);
-    op->add_args()->set_string_arg(path);
-    op->add_args()->set_int_arg(flags);
-    op->add_args()->set_int_arg(mode);
-}
-
-void create_unlink_op(int dir_fd, 
-                      const char* path, 
-                      int flags,
-                      Operation* op) 
-{
-    op->add_args()->mutable_dir_fd_arg()->set_fd(dir_fd);
-    op->add_args()->set_string_arg(path);
-    op->add_args()->set_int_arg(flags);
-}
-
-bool create_access_op(int dir_fd, 
-                      const char* path, 
-                      int mode,
-                      int flags,
-                      Operation* op) 
-{
-    // Don't try to elevate executable access checks for files that
-    // are not executable at all. 
-    if (mode == X_OK) {
-        auto p = fs::status(path).permissions();
-        if (((p & fs::perms::owner_exec) == fs::perms::none) &&
-            ((p & fs::perms::group_exec) == fs::perms::none) &&
-            ((p & fs::perms::others_exec) == fs::perms::none)) {
-            return false;
-        }
+    unsigned int pos = 0;
+    for (auto& result : *response->mutable_results()) {
+        if (result.has_fd_arg()) {
+            if (pos >= fds.size()) {
+                return false;
+            }
+            result.mutable_fd_arg()->set_fd(fds[pos]);
+            ++pos;
+        }   
     }
-    op->add_args()->mutable_dir_fd_arg()->set_fd(dir_fd);
-    op->add_args()->set_string_arg(path);
-    op->add_args()->set_int_arg(mode);
-    op->add_args()->set_int_arg(flags);
     return true;
 }
-
-void create_socket_op(int domain, int type, int protocol, Operation* op)
-{
-    op->add_args()->set_int_arg(domain);
-    op->add_args()->set_int_arg(type);
-    op->add_args()->set_int_arg(protocol);
-}
-
-void create_bind_op(int sockfd, const struct sockaddr *addr, socklen_t addrlen, 
-                    Operation* op)
-{
-    op->add_args()->mutable_socket_arg()->set_fd(sockfd);
-    op->add_args()->set_bytes_arg(std::string((const char*)addr, addrlen));
-}
-
 
 fs::path user_runtime_dir()
 {
@@ -206,42 +162,18 @@ static void hook(long syscall_number,
 {
     Operation op;
     std::vector<int> fds;
-    bool should_hook = true;
     op.set_syscall_num(syscall_number);
-    switch (syscall_number) {
-	// Must be in sync with switch statement in 'safe_hook' below.
-        case SYS_open: 
-            create_open_op(AT_FDCWD, (char*)arg0, arg1, arg2, &op);
-            break;
-        case SYS_openat:
-            create_open_op((int)arg0, (char*)arg1, arg2, arg3, &op);
-            break;
-        case SYS_unlink:
-            create_unlink_op(AT_FDCWD, (char*)arg0, 0, &op);
-            break;
-        case SYS_unlinkat:
-            create_unlink_op((int)arg0, (char*)arg1, arg2, &op);
-            break;
-        case SYS_access:
-            should_hook = create_access_op(AT_FDCWD, (char*)arg0, (int)arg1, 0, &op);
-            break;
-        case SYS_faccessat:
-            should_hook = create_access_op((int)arg0, (char*)arg1, (int)arg2, (int)arg3, &op);
-            break;
-        case SYS_socket:
-            create_socket_op((int)arg0, (int)arg1, (int)arg2, &op);
-            break;
-        case SYS_bind:
-            create_bind_op((int)arg0, (sockaddr*)arg1, (socklen_t)arg2, &op);
-            break;
-        default:
+    std::unique_ptr<SyscallMarshall> marshall(SyscallMarshall::New(syscall_number, arg0, arg1, arg2, arg3, arg4, arg5, result));
+    if (marshall == nullptr) {
             std::cerr << "Error: unexpected intercepted syscall: " << syscall_number << std::endl;
             return;
     }
 
-    if (!should_hook) {
+    if (!marshall->ShouldHook()) {
         return;
     }
+
+    *op.mutable_args() = marshall->GetArgs();
 
     auto fd_cwd = marshal_fds(&op, &fds);
 
@@ -273,17 +205,14 @@ static void hook(long syscall_number,
         return;
     }
 
-    if (elevation_response.is_result_fd()) {
-        if (fds.size() == 0) 
-        {
-            std::cerr << "Error: no file descriptor with approval" << std::endl;
-            return;
+    if (!unmarshal_fds(&elevation_response, fds)) {
+        for (auto& fd : fds) {
+            close(fd);
         }
-        *result = fds[0];
-    } else {
-        *result = elevation_response.result();
+        return;
     }
-    return;
+
+    marshall->ProcessResponse(elevation_response);
 }
 
 
@@ -296,16 +225,7 @@ static int safe_hook(long syscall_number,
                      long arg5,
                      long *result)
 {
-    switch (syscall_number) {
-    case SYS_open: 
-    case SYS_openat:
-    case SYS_unlink:
-    case SYS_unlinkat:
-    case SYS_access:
-    case SYS_socket:
-    case SYS_bind:
-        break;
-    default:
+    if (SyscallMarshall::registry.find(syscall_number) == SyscallMarshall::registry.end()) {
         return 1;
     }
 

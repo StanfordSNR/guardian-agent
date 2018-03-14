@@ -25,12 +25,7 @@ func OpenNoFollow(dirFD int, path string, flags int, mode uint32) (int, error) {
 	}
 	defer unix.Close(dirFD)
 
-	openFlags := flags | syscall.O_NOFOLLOW
-	childFD, err := unix.Openat(dirFD, last, openFlags, mode)
-	if err != nil {
-		return -1, err
-	}
-	return childFD, nil
+	return unix.Openat(dirFD, last, flags|syscall.O_NOFOLLOW, mode)
 }
 
 func UnlinkNoFollow(dirFD int, path string, flags int) error {
@@ -44,6 +39,28 @@ func UnlinkNoFollow(dirFD int, path string, flags int) error {
 	return unix.Unlinkat(dirFD, last, flags)
 }
 
+func MkdirNoFollow(dirFD int, path string, mode uint32) error {
+	base, last := split(path)
+	dirFD, err := OpenDirNoFollow(dirFD, base)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(dirFD)
+
+	return unix.Mkdirat(dirFD, last, mode)
+}
+
+func SymlinkNoFollow(target string, dirFD int, path string) error {
+	base, last := split(path)
+	dirFD, err := OpenDirNoFollow(dirFD, base)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(dirFD)
+
+	return unix.Symlinkat(target, dirFD, last)
+}
+
 func AccessNoFollow(dirFD int, path string, mode uint32, flags int) error {
 	base, last := split(path)
 	dirFD, err := OpenDirNoFollow(dirFD, base)
@@ -52,7 +69,18 @@ func AccessNoFollow(dirFD int, path string, mode uint32, flags int) error {
 	}
 	defer unix.Close(dirFD)
 
-	return unix.Faccessat(dirFD, last, mode, flags)
+	return unix.Faccessat(dirFD, last, mode, flags|syscall.O_NOFOLLOW)
+}
+
+func StatNoFollow(dirFD int, path string, stat *unix.Stat_t, flags int) error {
+	base, last := split(path)
+	dirFD, err := OpenDirNoFollow(dirFD, base)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(dirFD)
+
+	return unix.Fstatat(dirFD, last, stat, flags|unix.AT_SYMLINK_NOFOLLOW)
 }
 
 func OpenDirNoFollow(dirFD int, path string) (int, error) {

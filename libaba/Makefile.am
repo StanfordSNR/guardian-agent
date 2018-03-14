@@ -9,6 +9,7 @@ libhooks_la_SOURCES = util.hh \
 	file_descriptor.hh file_descriptor.cc \
 	address.hh address.cc \
 	hooks.cc \
+	marshalls.hh marshalls.cc \
 	socket.hh socket.cc \
 	poller.hh poller.cc \
 	timestamp.hh timestamp.cc \

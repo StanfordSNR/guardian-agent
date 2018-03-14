@@ -241,7 +241,6 @@ void UnixSocket::sendmsg(const std::string & payload, const std::vector<int> & f
 
   for (const auto& fd : fds) 
   {
-    printf("Sending fd: %d\n", fd);
     *fd_data = fd;
     ++fd_data;
   }

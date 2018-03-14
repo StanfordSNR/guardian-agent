@@ -10,8 +10,13 @@ message DirFd {
         string path = 2;
     }
 }
-message Socket {
+
+message Fd {
     int32 fd = 1;
+}
+
+message OutBuffer {
+    int32 len = 1;
 }
 
 message Argument {
@@ -19,8 +24,9 @@ message Argument {
         int32 int_arg = 1;
         string string_arg = 2;
         DirFd dir_fd_arg = 3;
-        Socket socket_arg = 4;
+        Fd fd_arg = 4;
         bytes bytes_arg = 5;
+        OutBuffer out_buffer_arg = 6;
     }
 }
 
@@ -66,6 +72,6 @@ message ElevationRequest {
 }
 
 message ElevationResponse {
-    bool is_result_fd = 1;
-    int32 result = 2;
+    int32 errno_code = 1;
+    repeated Argument results = 2;
 }

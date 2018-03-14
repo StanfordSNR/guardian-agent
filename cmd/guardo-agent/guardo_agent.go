@@ -81,44 +81,41 @@ func verifyFileDescriptorPath(fd int, path string) error {
 	return fmt.Errorf("File descriptor and path differ")
 }
 
-func handleOpen(dirFd *ga.DirFd, path string, flags int32, mode int32) (*ga.ElevationResponse, error) {
+func handleOpen(dirFd *ga.DirFd, path string, flags int32, mode int32) (*ga.Fd, error) {
 	fd, err := ga.OpenNoFollow(int(dirFd.GetFd()), path, int(flags), uint32(mode))
 	if err != nil {
 		return nil, err
 	}
-	return &ga.ElevationResponse{IsResultFd: true, Result: int32(fd)}, nil
+	return &ga.Fd{Fd: int32(fd)}, nil
 }
 
-func handleUnlink(dirFd *ga.DirFd, path string, flags int32) (*ga.ElevationResponse, error) {
-	err := ga.UnlinkNoFollow(int(dirFd.GetFd()), path, int(flags))
-	if err != nil {
-		return nil, err
-	}
-	return &ga.ElevationResponse{Result: 0}, nil
+func handleSymlink(target string, dirFd *ga.DirFd, path string) error {
+	return ga.SymlinkNoFollow(target, int(dirFd.GetFd()), path)
 }
 
-func handleAccess(dirFd *ga.DirFd, path string, mode int32, flags int32) (*ga.ElevationResponse, error) {
-	err := ga.AccessNoFollow(int(dirFd.GetFd()), path, uint32(mode), int(flags))
-	if err != nil {
-		return nil, err
-	}
-	return &ga.ElevationResponse{Result: 0}, nil
+func handleUnlink(dirFd *ga.DirFd, path string, flags int32) error {
+	return ga.UnlinkNoFollow(int(dirFd.GetFd()), path, int(flags))
 }
 
-func handleSocket(domain int32, typeArg int32, protocol int32) (*ga.ElevationResponse, error) {
+func handleMkdir(dirFd *ga.DirFd, path string, mode int32) error {
+	return ga.MkdirNoFollow(int(dirFd.GetFd()), path, uint32(mode))
+}
+
+func handleAccess(dirFd *ga.DirFd, path string, mode int32, flags int32) error {
+	return ga.AccessNoFollow(int(dirFd.GetFd()), path, uint32(mode), int(flags))
+}
+
+func handleSocket(domain int32, typeArg int32, protocol int32) (*ga.Fd, error) {
 	fd, err := unix.Socket(int(domain), int(typeArg), int(protocol))
 	if err != nil {
 		return nil, err
 	}
-	return &ga.ElevationResponse{IsResultFd: true, Result: int32(fd)}, nil
+	return &ga.Fd{Fd: int32(fd)}, nil
 }
 
-func handleBind(sock *ga.Socket, addr []byte) (*ga.ElevationResponse, error) {
+func handleBind(sock *ga.Fd, addr []byte) error {
 	_, _, err := syscall.Syscall(syscall.SYS_BIND, uintptr(sock.Fd), uintptr(unsafe.Pointer(&addr[0])), uintptr(len(addr)))
-	if err != 0 {
-		return nil, err
-	}
-	return &ga.ElevationResponse{Result: 0}, nil
+	return err
 }
 
 func (guardo *guardoAgent) checkCredential(req *ga.ElevationRequest, challenge *ga.Challenge) error {
@@ -155,25 +152,14 @@ func (guardo *guardoAgent) checkCredential(req *ga.ElevationRequest, challenge *
 	return pk.Verify(bytesToSign, sig)
 }
 
-func writeElevationResponse(c *net.UnixConn, resp *ga.ElevationResponse) error {
-	if resp.IsResultFd {
-		log.Printf("Returning file descriptor: %d", resp.Result)
-	} else {
-		log.Printf("Returning result: %d (%s)\n", resp.Result, syscall.Errno(-resp.Result).Error())
-	}
-
+func writeElevationResponse(c *net.UnixConn, resp *ga.ElevationResponse, fds []int) error {
 	header := make([]byte, 5)
 	data, err := proto.Marshal(resp)
 	if err != nil {
-		return fmt.Errorf("Failed to Marshal response: %s", err)
+		return fmt.Errorf("Failed to Marshal response %s: %s", resp, err)
 	}
 	binary.BigEndian.PutUint32(header, uint32(len(data)+1))
 	header[4] = byte(ga.MsgNum_ELEVATION_RESPONSE)
-	fds := []int{}
-	if resp.IsResultFd {
-		fds = append(fds, int(resp.Result))
-		defer syscall.Close(int(resp.Result))
-	}
 	rights := unix.UnixRights(fds...)
 	_, _, err = c.WriteMsgUnix(append(header[:], data[:]...), rights, nil)
 	if err != nil {
@@ -276,7 +262,7 @@ func (guardo *guardoAgent) handleConnection(c *net.UnixConn) error {
 		defer syscall.Close(*fd)
 	}
 
-	fmt.Fprintf(os.Stderr, "Requested syscall: %s\n", elevReq.GetOp().GetSyscallNum())
+	fmt.Fprintf(os.Stderr, "Requested syscall: %d\n", elevReq.GetOp().GetSyscallNum())
 
 	if err := guardo.checkCredential(elevReq, challenge); err != nil {
 		return fmt.Errorf("Credentials error: %s", err)
@@ -286,18 +272,14 @@ func (guardo *guardoAgent) handleConnection(c *net.UnixConn) error {
 
 	handler, err := guardo.getRequestHandler(elevReq.GetOp(), fd)
 	if err != nil {
-		writeElevationResponse(c, &ga.ElevationResponse{Result: -1})
+		writeElevationResponse(c, &ga.ElevationResponse{ErrnoCode: -1}, []int{})
 		return err
 	}
-	resp, err := handler()
-	if err != nil {
-		writeElevationResponse(c, &ga.ElevationResponse{Result: -1})
-		return err
-	}
-	return writeElevationResponse(c, resp)
+	resp, fds := handler()
+	return writeElevationResponse(c, resp, fds)
 }
 
-func (guardo *guardoAgent) getRequestHandler(op *ga.Operation, fd *int) (func() (*ga.ElevationResponse, error), error) {
+func (guardo *guardoAgent) getRequestHandler(op *ga.Operation, fd *int) (func() (*ga.ElevationResponse, []int), error) {
 	log.Printf("Requested operation: %s\n", op)
 
 	argList := []reflect.Value{}
@@ -309,9 +291,9 @@ func (guardo *guardoAgent) getRequestHandler(op *ga.Operation, fd *int) (func() 
 			}
 			arg.DirFdArg.Form = &ga.DirFd_Fd{Fd: int32(*fd)}
 			argList = append(argList, reflect.ValueOf(arg.DirFdArg))
-		case *ga.Argument_SocketArg:
-			arg.SocketArg.Fd = int32(*fd)
-			argList = append(argList, reflect.ValueOf(arg.SocketArg))
+		case *ga.Argument_FdArg:
+			arg.FdArg.Fd = int32(*fd)
+			argList = append(argList, reflect.ValueOf(arg.FdArg))
 		case *ga.Argument_IntArg:
 			argList = append(argList, reflect.ValueOf(arg.IntArg))
 		case *ga.Argument_StringArg:
@@ -338,17 +320,31 @@ func (guardo *guardoAgent) getRequestHandler(op *ga.Operation, fd *int) (func() 
 				i, op.SyscallNum, reflect.TypeOf(handler).In(i), arg.Type())
 		}
 	}
-	if reflect.TypeOf(handler).NumOut() != 2 || reflect.TypeOf(handler).Out(0) != reflect.TypeOf((*ga.ElevationResponse)(nil)) || reflect.TypeOf(handler).Out(1) != reflect.TypeOf((*error)(nil)).Elem() {
-		return nil, fmt.Errorf("Invalid return type of handler: %s", reflect.TypeOf(handler))
+	if reflect.TypeOf(handler).NumOut() < 1 || reflect.TypeOf(handler).Out(reflect.TypeOf(handler).NumOut()-1) != reflect.TypeOf((*error)(nil)).Elem() {
+		return nil, fmt.Errorf("Invalid return type of handler: %s, must return error as last value", reflect.TypeOf(handler))
 	}
-	return func() (resp *ga.ElevationResponse, err error) {
-		result := reflect.ValueOf(handler).Call(argList)
-		if !result[0].IsNil() {
-			resp = result[0].Interface().(*ga.ElevationResponse)
+
+	return func() (resp *ga.ElevationResponse, fds []int) {
+		resp = &ga.ElevationResponse{}
+		fds = []int{}
+
+		results := reflect.ValueOf(handler).Call(argList)
+		if !results[len(results)-1].IsNil() {
+			resp.ErrnoCode = int32(results[len(results)-1].Interface().(syscall.Errno))
 		}
-		if !result[1].IsNil() {
-			err = result[1].Interface().(error)
+
+		for _, result := range results[0 : len(results)-1] {
+			switch result.Type() {
+			case reflect.TypeOf(&ga.Fd{}):
+				resp.Results = append(resp.Results, &ga.Argument{&ga.Argument_FdArg{result.Interface().(*ga.Fd)}})
+				fds = append(fds, int(result.Interface().(*ga.Fd).Fd))
+				break
+			case reflect.TypeOf(int32(0)):
+				resp.Results = append(resp.Results, &ga.Argument{&ga.Argument_IntArg{int32(result.Int())}})
+				break
+			}
 		}
+
 		return
 	}, nil
 }
@@ -356,8 +352,13 @@ func (guardo *guardoAgent) getRequestHandler(op *ga.Operation, fd *int) (func() 
 var handlerRegistry = map[int32]interface{}{
 	syscall.SYS_OPENAT:    handleOpen,
 	syscall.SYS_OPEN:      handleOpen,
+	syscall.SYS_SYMLINK:   handleSymlink,
+	syscall.SYS_SYMLINKAT: handleSymlink,
 	syscall.SYS_UNLINK:    handleUnlink,
 	syscall.SYS_UNLINKAT:  handleUnlink,
+	syscall.SYS_MKDIR:     handleMkdir,
+	syscall.SYS_MKDIRAT:   handleMkdir,
+	syscall.SYS_RMDIR:     handleUnlink,
 	syscall.SYS_ACCESS:    handleAccess,
 	syscall.SYS_FACCESSAT: handleAccess,
 	syscall.SYS_SOCKET:    handleSocket,
