@@ -4,10 +4,13 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"unsafe"
 
 	"github.com/pkg/errors"
 	"golang.org/x/sys/unix"
 )
+
+const SYS_RENAMEAT2 = 316
 
 func split(path string) (base string, last string) {
 	for ; strings.HasSuffix(path, "//"); path = path[0 : len(path)-1] {
@@ -25,7 +28,28 @@ func OpenNoFollow(dirFD int, path string, flags int, mode uint32) (int, error) {
 	}
 	defer unix.Close(dirFD)
 
-	return unix.Openat(dirFD, last, flags|syscall.O_NOFOLLOW, mode)
+	fd, err := unix.Openat(dirFD, last, flags|unix.O_NOFOLLOW, mode)
+	if err != nil {
+		return fd, err
+	}
+
+	// If user request O_PATH but not O_NOFOLLOW, and path points to a symbolic link
+	// then the syscall may succeed even though it should fail. We check this and force failure.
+	if flags&unix.O_PATH == 0 || flags&unix.O_NOFOLLOW != 0 {
+		return fd, err
+	}
+
+	stat := unix.Stat_t{}
+	err = unix.Fstat(fd, &stat)
+	if err != nil {
+		unix.Close(fd)
+		return -1, err
+	}
+	if stat.Mode&syscall.S_IFMT == syscall.S_IFLNK {
+		unix.Close(fd)
+		return -1, syscall.ELOOP
+	}
+	return fd, nil
 }
 
 func UnlinkNoFollow(dirFD int, path string, flags int) error {
@@ -61,7 +85,7 @@ func SymlinkNoFollow(target string, dirFD int, path string) error {
 	return unix.Symlinkat(target, dirFD, last)
 }
 
-func AccessNoFollow(dirFD int, path string, mode uint32, flags int) error {
+func AccessNoFollow(dirFD int, path string, mode uint32) error {
 	base, last := split(path)
 	dirFD, err := OpenDirNoFollow(dirFD, base)
 	if err != nil {
@@ -69,7 +93,57 @@ func AccessNoFollow(dirFD int, path string, mode uint32, flags int) error {
 	}
 	defer unix.Close(dirFD)
 
-	return unix.Faccessat(dirFD, last, mode, flags|syscall.O_NOFOLLOW)
+	// TODO: we cannot use faccessat for two reasons:
+	//  * faccessat does not have a NOFOLLOW variant (the flags arugment is
+	//    processed by the libc wrapper and not by the syscall)
+	//  * faccessat checks using the real userid, but we want to check using the
+	//    effective userid in case the guardo dameon runs as a setuid binary
+
+	stats := unix.Stat_t{}
+	err = unix.Fstatat(dirFD, last, &stats, unix.AT_SYMLINK_NOFOLLOW)
+	if err != nil {
+		return err
+	}
+	if stats.Mode&syscall.S_IFMT == syscall.S_IFLNK {
+		return syscall.ELOOP
+	}
+
+	// clear irrelevant bits
+	mode &= (unix.X_OK | unix.R_OK | unix.W_OK)
+
+	if mode == unix.F_OK {
+		return nil
+	}
+
+	uid := uint32(syscall.Geteuid())
+	gid := uint32(syscall.Getegid())
+	groups, err := syscall.Getgroups()
+	if err != nil {
+		groups = []int{}
+	}
+	groupmap := map[uint32]bool{}
+	for _, g := range groups {
+		groupmap[uint32(g)] = true
+	}
+
+	if uid == 0 && ((mode&unix.X_OK) == 0 || (stats.Mode&(unix.S_IXUSR|unix.S_IXGRP|unix.S_IXOTH)) != 0) {
+		return nil
+	}
+
+	granted := uint32(0)
+	if uid == stats.Uid {
+		granted = (stats.Mode & (mode << 6)) >> 6
+	} else if gid == stats.Gid || groupmap[stats.Gid] {
+		granted = (stats.Mode & (mode << 3)) >> 3
+	} else {
+		granted = (stats.Mode & mode)
+	}
+
+	if granted == mode {
+		return nil
+	}
+	return unix.EACCES
+
 }
 
 func StatNoFollow(dirFD int, path string, stat *unix.Stat_t, flags int) error {
@@ -80,7 +154,76 @@ func StatNoFollow(dirFD int, path string, stat *unix.Stat_t, flags int) error {
 	}
 	defer unix.Close(dirFD)
 
-	return unix.Fstatat(dirFD, last, stat, flags|unix.AT_SYMLINK_NOFOLLOW)
+	err = unix.Fstatat(dirFD, last, stat, flags|unix.AT_SYMLINK_NOFOLLOW)
+	if err != nil {
+		return err
+	}
+
+	// If user did not specify O_NOFOLLOW, but the path points to a symbolic link
+	// we force-fail the syscall.
+	if flags&unix.AT_SYMLINK_NOFOLLOW != 0 {
+		return nil
+	}
+
+	if stat.Mode&syscall.S_IFMT == syscall.S_IFLNK {
+		return syscall.ELOOP
+	}
+
+	return nil
+}
+
+func ReadlinkNoFollow(dirFD int, path string, buf []byte, bufSize int) (int, error) {
+	base, last := split(path)
+	dirFD, err := OpenDirNoFollow(dirFD, base)
+	if err != nil {
+		return 0, err
+	}
+	defer unix.Close(dirFD)
+
+	return unix.Readlinkat(dirFD, last, buf)
+}
+
+func RenameNoFollow(oldDirFd int, oldPath string, newDirFd int, newPath string, flags int) error {
+	oldBase, oldLast := split(oldPath)
+	oldDirFd, err := OpenDirNoFollow(oldDirFd, oldBase)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(oldDirFd)
+
+	newBase, newLast := split(newPath)
+	newDirFd, err = OpenDirNoFollow(newDirFd, newBase)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(newDirFd)
+
+	oldPtr, err := unix.BytePtrFromString(oldLast)
+	if err != nil {
+		return err
+	}
+	newPtr, err := unix.BytePtrFromString(newLast)
+	if err != nil {
+		return err
+	}
+
+	_, _, errno := syscall.Syscall6(
+		SYS_RENAMEAT2,
+		uintptr(oldDirFd),
+		uintptr(unsafe.Pointer(oldPtr)),
+		uintptr(newDirFd),
+		uintptr(unsafe.Pointer(newPtr)),
+		uintptr(flags),
+		0,
+	)
+
+	if errno != 0 {
+		// In the syscall module the authors box a couple of common errors
+		// (i.e EAGAIN, EINVAL, and ENOENT). Is that worth doing here?
+		return syscall.Errno(errno)
+	}
+
+	return nil
 }
 
 func OpenDirNoFollow(dirFD int, path string) (int, error) {

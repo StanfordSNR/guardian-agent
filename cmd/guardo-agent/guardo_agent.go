@@ -101,12 +101,20 @@ func handleMkdir(dirFd *ga.DirFd, path string, mode int32) error {
 	return ga.MkdirNoFollow(int(dirFd.GetFd()), path, uint32(mode))
 }
 
-func handleAccess(dirFd *ga.DirFd, path string, mode int32, flags int32) error {
-	return ga.AccessNoFollow(int(dirFd.GetFd()), path, uint32(mode), int(flags))
+func handleAccess(dirFd *ga.DirFd, path string, mode int32) error {
+	return ga.AccessNoFollow(int(dirFd.GetFd()), path, uint32(mode))
 }
 
 func handleStat(dirFd *ga.DirFd, path string, statbuf []byte, flags int32) error {
 	return ga.StatNoFollow(int(dirFd.GetFd()), path, (*unix.Stat_t)(unsafe.Pointer(&statbuf[0])), int(flags))
+}
+
+func handleReadlink(dirFd *ga.DirFd, path string, buf []byte, bufSize int32) (int, error) {
+	return ga.ReadlinkNoFollow(int(dirFd.GetFd()), path, buf, int(bufSize))
+}
+
+func handleRename(oldDirFd *ga.DirFd, oldPath string, newDirFd *ga.DirFd, newPath string, flags int32) error {
+	return ga.RenameNoFollow(int(oldDirFd.GetFd()), oldPath, int(newDirFd.GetFd()), newPath, int(flags))
 }
 
 func handleSocket(domain int32, typeArg int32, protocol int32) (*ga.Fd, error) {
@@ -173,7 +181,7 @@ func writeElevationResponse(c *net.UnixConn, resp *ga.ElevationResponse, fds []i
 	return nil
 }
 
-func readRequest(c *net.UnixConn, expectedMsgNum ga.MsgNum, pb proto.Message) (fd *int, err error) {
+func readRequest(c *net.UnixConn, expectedMsgNum ga.MsgNum, pb proto.Message) (fd []int, err error) {
 	const MaxPacketLen = 4096
 	packet := make([]byte, MaxPacketLen)
 	oob := make([]byte, unix.CmsgSpace(4))
@@ -218,10 +226,7 @@ func readRequest(c *net.UnixConn, expectedMsgNum ga.MsgNum, pb proto.Message) (f
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to parse unix rights")
 	}
-	if len(fds) != 1 {
-		return nil, fmt.Errorf("Invalid number of file descriptors in control message, expected only one, got: %d", len(fds))
-	}
-	return &fds[0], nil
+	return fds, nil
 }
 
 func (guardo *guardoAgent) generateChallenge() (*ga.Challenge, error) {
@@ -259,12 +264,12 @@ func (guardo *guardoAgent) handleConnection(c *net.UnixConn) error {
 	}
 
 	elevReq := &ga.ElevationRequest{}
-	fd := new(int)
-	if fd, err = readRequest(c, ga.MsgNum_ELEVATION_REQUEST, elevReq); err != nil {
+	fds := []int{}
+	if fds, err = readRequest(c, ga.MsgNum_ELEVATION_REQUEST, elevReq); err != nil {
 		return errors.Wrapf(err, "Failed to read elevation request")
 	}
-	if fd != nil {
-		defer syscall.Close(*fd)
+	for _, fd := range fds {
+		defer syscall.Close(fd)
 	}
 
 	fmt.Fprintf(os.Stderr, "Requested syscall: %d\n", elevReq.GetOp().GetSyscallNum())
@@ -275,7 +280,7 @@ func (guardo *guardoAgent) handleConnection(c *net.UnixConn) error {
 
 	fmt.Fprintln(os.Stderr, "Credentials OK")
 
-	handler, err := guardo.getRequestHandler(elevReq.GetOp(), fd)
+	handler, err := guardo.getRequestHandler(elevReq.GetOp(), fds)
 	if err != nil {
 		writeElevationResponse(c, &ga.ElevationResponse{ErrnoCode: -1}, []int{})
 		return err
@@ -284,21 +289,31 @@ func (guardo *guardoAgent) handleConnection(c *net.UnixConn) error {
 	return writeElevationResponse(c, resp, fds)
 }
 
-func (guardo *guardoAgent) getRequestHandler(op *ga.Operation, fd *int) (func() (*ga.ElevationResponse, []int), error) {
+func (guardo *guardoAgent) getRequestHandler(op *ga.Operation, fds []int) (func() (*ga.ElevationResponse, []int), error) {
 	log.Printf("Requested operation: %s\n", op)
 
+	fdPos := 0
 	argList := []reflect.Value{}
 	results := []reflect.Value{}
 	for _, arg := range op.Args {
 		switch arg := arg.Arg.(type) {
 		case *ga.Argument_DirFdArg:
-			if err := verifyFileDescriptorPath(*fd, arg.DirFdArg.GetPath()); err != nil {
-				return nil, fmt.Errorf("FD does not match path: %d, %s: %s", *fd, arg.DirFdArg.GetPath(), err)
+			if fdPos >= len(fds) {
+				return nil, fmt.Errorf("Missing FD. Have only %d but want at least one more", fdPos)
 			}
-			arg.DirFdArg.Form = &ga.DirFd_Fd{Fd: int32(*fd)}
+			fd := fds[fdPos]
+			fdPos++
+			if err := verifyFileDescriptorPath(fd, arg.DirFdArg.GetPath()); err != nil {
+				return nil, fmt.Errorf("FD does not match path: %d, %s: %s", fd, arg.DirFdArg.GetPath(), err)
+			}
+			arg.DirFdArg.Form = &ga.DirFd_Fd{Fd: int32(fd)}
 			argList = append(argList, reflect.ValueOf(arg.DirFdArg))
 		case *ga.Argument_FdArg:
-			arg.FdArg.Fd = int32(*fd)
+			if fdPos >= len(fds) {
+				return nil, fmt.Errorf("Missing FD. Have only %d but want at least one more", fdPos)
+			}
+			arg.FdArg.Fd = int32(fds[fdPos])
+			fdPos++
 			argList = append(argList, reflect.ValueOf(arg.FdArg))
 		case *ga.Argument_IntArg:
 			argList = append(argList, reflect.ValueOf(arg.IntArg))
@@ -340,8 +355,12 @@ func (guardo *guardoAgent) getRequestHandler(op *ga.Operation, fd *int) (func() 
 
 		retvals := reflect.ValueOf(handler).Call(argList)
 		if !retvals[len(retvals)-1].IsNil() {
-			resp.ErrnoCode = int32(retvals[len(retvals)-1].Interface().(syscall.Errno))
+			err := retvals[len(retvals)-1].Interface().(syscall.Errno)
+			resp.ErrnoCode = int32(err)
+			fmt.Fprintf(os.Stderr, "Syscall failed: %s\n", err)
+			return
 		}
+		fmt.Fprintln(os.Stderr, "Syscall succeeded")
 
 		results = append(retvals[0:len(retvals)-1], results...)
 
@@ -352,6 +371,8 @@ func (guardo *guardoAgent) getRequestHandler(op *ga.Operation, fd *int) (func() 
 				fds = append(fds, int(result.Interface().(*ga.Fd).Fd))
 				break
 			case reflect.TypeOf(int32(0)):
+				fallthrough
+			case reflect.TypeOf(int(0)):
 				resp.Results = append(resp.Results, &ga.Argument{&ga.Argument_IntArg{int32(result.Int())}})
 				break
 			case reflect.TypeOf([]byte{}):
@@ -375,11 +396,16 @@ var handlerRegistry = map[int32]interface{}{
 	syscall.SYS_RMDIR:      handleUnlink,
 	syscall.SYS_ACCESS:     handleAccess,
 	syscall.SYS_FACCESSAT:  handleAccess,
-	syscall.SYS_SOCKET:     handleSocket,
-	syscall.SYS_BIND:       handleBind,
 	syscall.SYS_NEWFSTATAT: handleStat,
 	syscall.SYS_LSTAT:      handleStat,
 	syscall.SYS_STAT:       handleStat,
+	syscall.SYS_READLINKAT: handleReadlink,
+	syscall.SYS_READLINK:   handleReadlink,
+	ga.SYS_RENAMEAT2:       handleRename,
+	syscall.SYS_RENAMEAT:   handleRename,
+	syscall.SYS_RENAME:     handleRename,
+	syscall.SYS_SOCKET:     handleSocket,
+	syscall.SYS_BIND:       handleBind,
 }
 
 func main() {

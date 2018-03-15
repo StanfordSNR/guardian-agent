@@ -35,10 +35,30 @@ public:
 
     bool Process(const Argument& arg) 
     {
-        if (!arg.has_fd_arg()) {
+        if (arg.arg_case() != Argument::kFdArg) {
             return false;
         }
         *result = arg.fd_arg().fd();
+        return true;
+    }
+
+private:
+    long int* result;
+};
+
+class IntProcessor : public ResultProcessor 
+{
+public:
+    IntProcessor(long int* result)
+    : result(result)
+    {}
+
+    bool Process(const Argument& arg) 
+    {
+        if (arg.arg_case() != Argument::kIntArg) {
+            return false;
+        }
+        *result = arg.int_arg();
         return true;
     }
 
@@ -216,7 +236,6 @@ public:
         args.Add()->mutable_dir_fd_arg()->set_fd(arg0);
         args.Add()->set_string_arg((char*)arg1);
         args.Add()->set_int_arg(arg2);
-        args.Add()->set_int_arg(arg3);
     }
 
     bool ShouldHook() 
@@ -242,7 +261,6 @@ class AccessMarshall : public FaccessAtMarshall
 public:
     void Prepare() 
     {
-        arg3 = 0;
         arg2 = arg1;
         arg1 = arg0;
         arg0 = AT_FDCWD;
@@ -307,6 +325,63 @@ public:
 };
 REGISTER_SYSCALL_MARSHAL(SYS_fstat, FstatMarshall)
 
+
+class ReadlinkAtMarshall : public SyscallMarshall 
+{
+public:
+    void Prepare() 
+    {
+        args.Add()->mutable_dir_fd_arg()->set_fd(arg0);
+        args.Add()->set_string_arg((char*)arg1);
+        args.Add()->mutable_out_buffer_arg()->set_len(arg3);
+        args.Add()->set_int_arg(arg3);
+        result_processors.push_back(
+            std::unique_ptr<ResultProcessor>(new IntProcessor(result)));
+        result_processors.push_back(
+            std::unique_ptr<ResultProcessor>(new OutBufferProcessor((void*)arg2, arg3)));
+    }
+};
+REGISTER_SYSCALL_MARSHAL(SYS_readlinkat, ReadlinkAtMarshall)
+REGISTER_SYSCALL_MARSHAL(SYS_readlink, FromAtSyscall<ReadlinkAtMarshall>)
+
+class RenameAt2Marshall : public SyscallMarshall 
+{
+public:
+    void Prepare() 
+    {
+        args.Add()->mutable_dir_fd_arg()->set_fd(arg0);
+        args.Add()->set_string_arg((char*)arg1);
+        args.Add()->mutable_dir_fd_arg()->set_fd(arg2);
+        args.Add()->set_string_arg((char*)arg3);
+        args.Add()->set_int_arg(arg4);
+    }
+};                     
+REGISTER_SYSCALL_MARSHAL(SYS_renameat2, RenameAt2Marshall)
+
+class RenameAtMarshall : public RenameAt2Marshall 
+{
+public:
+    void Prepare() 
+    {
+        arg4 = 0;
+        RenameAt2Marshall::Prepare();
+    }
+};
+REGISTER_SYSCALL_MARSHAL(SYS_renameat, RenameAtMarshall)
+
+class RenameMarshall : public RenameAtMarshall 
+{
+public:
+    void Prepare() 
+    {
+        arg3 = arg1;
+        arg2 = AT_FDCWD;
+        arg1 = arg0;
+        arg0 = AT_FDCWD;
+        RenameAtMarshall::Prepare();
+    }
+};
+REGISTER_SYSCALL_MARSHAL(SYS_rename, RenameMarshall)
 
 class SocketMarshall : public SyscallMarshall 
 {
