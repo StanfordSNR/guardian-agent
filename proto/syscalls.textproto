@@ -238,6 +238,7 @@ syscall {
 syscall {
     name: "readlinkat"
     num: 267
+    retval: INT32
     params {
         name: "dir_fd"
         type: DIR_FD

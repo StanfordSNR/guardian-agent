@@ -81,10 +81,23 @@ public:
 
     void Prepare() 
     {
+        switch (syscall_spec.retval()) {
+            case Param::INT32:
+                result_processors.push_back(std::unique_ptr<ResultProcessor>(new IntProcessor(result)));
+                break;
+            case Param::FD:
+                result_processors.push_back(std::unique_ptr<ResultProcessor>(new FdProcessor(result)));
+                break;
+            case Param::UNKNOWN:
+                break;
+            default:
+                std::cerr << "Unexpected retval type: " << syscall_spec.retval() << std::endl;
+        }
+
         std::cerr << "Prepare " << syscall_spec.name() << std::endl;
         long raw_args[] = {arg0, arg1, arg2, arg3, arg4, arg5};
         if (syscall_spec.add_fd_cwd()) {
-            args.Add()->mutable_fd_arg()->set_fd(AT_FDCWD);            
+            args.Add()->mutable_dir_fd_arg()->set_fd(AT_FDCWD);            
         }
 
         for (int i = 0; i < syscall_spec.params_size(); ++i) {
@@ -135,19 +148,6 @@ public:
                 default:
                     std::cerr << "Unknown param type: %d" << param.type() << std::endl;
             }
-        }
-
-        switch (syscall_spec.retval()) {
-            case Param::INT32:
-                result_processors.push_back(std::unique_ptr<ResultProcessor>(new IntProcessor(result)));
-                break;
-            case Param::FD:
-                result_processors.push_back(std::unique_ptr<ResultProcessor>(new FdProcessor(result)));
-                break;
-            case Param::UNKNOWN:
-                break;
-            default:
-                std::cerr << "Unexpected retval type: " << syscall_spec.retval() << std::endl;
         }
     }
 

@@ -89,32 +89,64 @@ func handleOpen(dirFd *ga.DirFd, path string, flags int32, mode int32) (*ga.Fd, 
 	return &ga.Fd{Fd: int32(fd)}, nil
 }
 
-func handleSymlink(target string, dirFd *ga.DirFd, path string) error {
+func handleMkdir(dirFd *ga.DirFd, path string, mode int32) error {
+	return ga.MkdirNoFollow(int(dirFd.GetFd()), path, uint32(mode))
+}
+
+func handleSymlinkAt(target string, dirFd *ga.DirFd, path string) error {
 	return ga.SymlinkNoFollow(target, int(dirFd.GetFd()), path)
 }
 
-func handleUnlink(dirFd *ga.DirFd, path string, flags int32) error {
+func handleSymlink(dirFd *ga.DirFd, target string, path string) error {
+	return handleSymlinkAt(target, dirFd, path)
+}
+
+func handleUnlinkAt(dirFd *ga.DirFd, path string, flags int32) error {
 	return ga.UnlinkNoFollow(int(dirFd.GetFd()), path, int(flags))
 }
 
-func handleMkdir(dirFd *ga.DirFd, path string, mode int32) error {
-	return ga.MkdirNoFollow(int(dirFd.GetFd()), path, uint32(mode))
+func handleUnlink(dirFd *ga.DirFd, path string) error {
+	return ga.UnlinkNoFollow(int(dirFd.GetFd()), path, 0)
+}
+
+func handleRmdir(dirFd *ga.DirFd, path string) error {
+	return ga.UnlinkNoFollow(int(dirFd.GetFd()), path, unix.AT_REMOVEDIR)
 }
 
 func handleAccess(dirFd *ga.DirFd, path string, mode int32) error {
 	return ga.AccessNoFollow(int(dirFd.GetFd()), path, uint32(mode))
 }
 
-func handleStat(dirFd *ga.DirFd, path string, statbuf []byte, flags int32) error {
+func handleFstatat(dirFd *ga.DirFd, path string, statbuf []byte, flags int32) error {
 	return ga.StatNoFollow(int(dirFd.GetFd()), path, (*unix.Stat_t)(unsafe.Pointer(&statbuf[0])), int(flags))
+}
+
+func handleStat(dirFd *ga.DirFd, path string, statbuf []byte) error {
+	return handleFstatat(dirFd, path, statbuf, 0)
+}
+
+func handleLstat(dirFd *ga.DirFd, path string, statbuf []byte) error {
+	return handleFstatat(dirFd, path, statbuf, unix.AT_SYMLINK_NOFOLLOW)
+}
+
+func handleFstat(fd *ga.Fd, statbuf []byte) error {
+	return syscall.Fstat(int(fd.GetFd()), (*syscall.Stat_t)(unsafe.Pointer(&statbuf[0])))
 }
 
 func handleReadlink(dirFd *ga.DirFd, path string, buf []byte, bufSize int32) (int, error) {
 	return ga.ReadlinkNoFollow(int(dirFd.GetFd()), path, buf, int(bufSize))
 }
 
-func handleRename(oldDirFd *ga.DirFd, oldPath string, newDirFd *ga.DirFd, newPath string, flags int32) error {
+func handleRenameAt2(oldDirFd *ga.DirFd, oldPath string, newDirFd *ga.DirFd, newPath string, flags int32) error {
 	return ga.RenameNoFollow(int(oldDirFd.GetFd()), oldPath, int(newDirFd.GetFd()), newPath, int(flags))
+}
+
+func handleRenameAt(oldDirFd *ga.DirFd, oldPath string, newDirFd *ga.DirFd, newPath string) error {
+	return handleRenameAt2(oldDirFd, oldPath, newDirFd, newPath, 0)
+}
+
+func handleRename(dirFd *ga.DirFd, oldPath string, newPath string) error {
+	return handleRenameAt2(dirFd, oldPath, dirFd, newPath, 0)
 }
 
 func handleSocket(domain int32, typeArg int32, protocol int32) (*ga.Fd, error) {
@@ -390,22 +422,23 @@ func (guardo *guardoAgent) getRequestHandler(op *ga.Operation, fds []int) (func(
 var handlerRegistry = map[int32]interface{}{
 	syscall.SYS_OPENAT:     handleOpen,
 	syscall.SYS_OPEN:       handleOpen,
-	syscall.SYS_SYMLINK:    handleSymlink,
-	syscall.SYS_SYMLINKAT:  handleSymlink,
-	syscall.SYS_UNLINK:     handleUnlink,
-	syscall.SYS_UNLINKAT:   handleUnlink,
 	syscall.SYS_MKDIR:      handleMkdir,
 	syscall.SYS_MKDIRAT:    handleMkdir,
-	syscall.SYS_RMDIR:      handleUnlink,
+	syscall.SYS_SYMLINK:    handleSymlink,
+	syscall.SYS_SYMLINKAT:  handleSymlinkAt,
+	syscall.SYS_UNLINK:     handleUnlink,
+	syscall.SYS_UNLINKAT:   handleUnlinkAt,
+	syscall.SYS_RMDIR:      handleRmdir,
 	syscall.SYS_ACCESS:     handleAccess,
 	syscall.SYS_FACCESSAT:  handleAccess,
-	syscall.SYS_NEWFSTATAT: handleStat,
-	syscall.SYS_LSTAT:      handleStat,
+	syscall.SYS_NEWFSTATAT: handleFstatat,
+	syscall.SYS_LSTAT:      handleLstat,
 	syscall.SYS_STAT:       handleStat,
+	syscall.SYS_FSTAT:      handleFstat,
 	syscall.SYS_READLINKAT: handleReadlink,
 	syscall.SYS_READLINK:   handleReadlink,
-	ga.SYS_RENAMEAT2:       handleRename,
-	syscall.SYS_RENAMEAT:   handleRename,
+	ga.SYS_RENAMEAT2:       handleRenameAt2,
+	syscall.SYS_RENAMEAT:   handleRenameAt,
 	syscall.SYS_RENAME:     handleRename,
 	syscall.SYS_SOCKET:     handleSocket,
 	syscall.SYS_BIND:       handleBind,
