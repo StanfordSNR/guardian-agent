@@ -18,16 +18,13 @@ public:
 
 class SyscallMarshall {
 public:
+    SyscallMarshall(long int* result): result(result) {}
     virtual google::protobuf::RepeatedPtrField<Argument> GetArgs() { return args; };
     virtual void ProcessResponse(const ElevationResponse& response);
 
     virtual ~SyscallMarshall() {}
 
 protected: 
-    friend class SyscallMarshallRegistry;
-    
-    virtual void Prepare() = 0;
-    long arg0, arg1, arg2, arg3, arg4, arg5;
     long int* result;
     google::protobuf::RepeatedPtrField<Argument> args;
     std::vector<std::unique_ptr<ResultProcessor>> result_processors;
@@ -36,14 +33,16 @@ protected:
 class SyscallMarshallRegistry 
 {
 public:
-    static void Register(long syscall_number, std::function<SyscallMarshall*()> factory_func);
+    typedef std::function<SyscallMarshall*(long raw_args[6], long int* result)> FactoryFunc;
+
+    static void Register(long syscall_number, FactoryFunc factory_func);
     static void Register(const SyscallSpec& spec);
     static bool IsRegistered(long syscall_number);
 
-    static SyscallMarshall* New(long syscall_number, long arg0, long arg1, long arg2, long arg3, long arg4, long arg5, long int* result); 
+    static SyscallMarshall* New(long syscall_number, long raw_args[6], long int* result); 
 
 private:
-    typedef std::map<int, std::function<SyscallMarshall*()>> Registry;
+    typedef std::map<int, FactoryFunc> Registry;
 
     static Registry* Get();
 };

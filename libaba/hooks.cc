@@ -154,7 +154,7 @@ bool get_credential(const Operation& op, const Challenge& challenge, Credential*
     return true;
 }
 
-bool skip_hook(long syscall_number, long arg0, long arg1, long arg2) 
+bool skip_hook(long syscall_number, long raw_args[6]) 
 {
     // Don't try to elevate executable access checks for files that
     // are not executable at all. 
@@ -164,17 +164,17 @@ bool skip_hook(long syscall_number, long arg0, long arg1, long arg2)
     struct stat statbuf;
     memset(&statbuf, 0, sizeof(statbuf));
     if (syscall_number == SYS_access) {
-        if (arg1 != X_OK) {
+        if (raw_args[1] != X_OK) {
             return false;
         }
-        if (stat((char*)arg0, &statbuf) != 0) {
+        if (stat((char*)raw_args[0], &statbuf) != 0) {
             return false;
         }
     } else { // faccessat
-        if (arg2 != X_OK) {
+        if (raw_args[2] != X_OK) {
             return false;
         }
-        if (fstatat(arg0, (char*)arg1, &statbuf, 0) != 0) {
+        if (fstatat(raw_args[0], (char*)raw_args[1], &statbuf, 0) != 0) {
             return false;
         }
     }
@@ -182,23 +182,16 @@ bool skip_hook(long syscall_number, long arg0, long arg1, long arg2)
     return (!(p & S_IXUSR) && !(p & S_IXGRP) && !(p & S_IXOTH));
 }
 
-static void hook(long syscall_number,
-                 long arg0, 
-                 long arg1,
-                 long arg2, 
-                 long arg3, 
-                 __attribute__((unused)) long arg4, 
-                 __attribute__((unused)) long arg5,
-                long int* result)
+static void hook(long syscall_number, long raw_args[6], long int* result)
 {
-    if (skip_hook(syscall_number, arg0, arg1, arg2)) {
+    if (skip_hook(syscall_number, raw_args)) {
         return;
     }
 
     Operation op;
     std::vector<int> fds;
     op.set_syscall_num(syscall_number);
-    std::unique_ptr<SyscallMarshall> marshall(SyscallMarshallRegistry::New(syscall_number, arg0, arg1, arg2, arg3, arg4, arg5, result));
+    std::unique_ptr<SyscallMarshall> marshall(SyscallMarshallRegistry::New(syscall_number, raw_args, result));
     if (marshall == nullptr) {
             std::cerr << "Error: unexpected intercepted syscall: " << syscall_number << std::endl;
             return;
@@ -267,7 +260,8 @@ static int safe_hook(long syscall_number,
     }
 
     try {
-        hook(syscall_number, arg0, arg1, arg2, arg3, arg4, arg5, result);
+        long raw_args[6] = {arg0, arg1, arg2, arg3, arg4, arg5};
+        hook(syscall_number, raw_args, result);
     } catch ( const std::exception & e ) { /* don't throw from hook */
         print_exception( e );
     } catch (...) {
