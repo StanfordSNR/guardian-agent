@@ -11,41 +11,27 @@ using google::protobuf::RepeatedPtrField;
 class FdProcessor : public ResultProcessor 
 {
 public:
-    FdProcessor(long int* result)
-    : result(result)
-    {}
-
-    bool Process(const Argument& arg) 
+    bool Process(const Argument& arg, long* raw_result) 
     {
         if (arg.arg_case() != Argument::kFdArg) {
             return false;
         }
-        *result = arg.fd_arg().fd();
+        *raw_result = arg.fd_arg().fd();
         return true;
     }
-
-private:
-    long int* result;
 };
 
 class IntProcessor : public ResultProcessor 
 {
 public:
-    IntProcessor(long int* result)
-    : result(result)
-    {}
-
-    bool Process(const Argument& arg) 
+    bool Process(const Argument& arg, long* raw_result) 
     {
         if (arg.arg_case() != Argument::kIntArg) {
             return false;
         }
-        *result = arg.int_arg();
+        *raw_result = arg.int_arg();
         return true;
     }
-
-private:
-    long int* result;
 };
 
 class OutBufferProcessor : public ResultProcessor 
@@ -54,7 +40,7 @@ public:
     OutBufferProcessor(void* buffer, size_t buffer_size)
     : buf(buffer), count(buffer_size) {}
 
-    bool Process(const Argument& arg)
+    bool Process(const Argument& arg, long*)
     {
         if (arg.arg_case() != Argument::kBytesArg) {
             return false;
@@ -74,15 +60,14 @@ private:
 class DynamicMarshall : public SyscallMarshall 
 {
 public:
-    DynamicMarshall(const SyscallSpec& spec, long raw_args[6], long int* result) 
-    : SyscallMarshall(result)
+    DynamicMarshall(const SyscallSpec& spec, long raw_args[6]) 
     {
         switch (spec.retval()) {
             case Param::INT32:
-                result_processors.push_back(std::unique_ptr<ResultProcessor>(new IntProcessor(result)));
+                result_processors.push_back(std::unique_ptr<ResultProcessor>(new IntProcessor));
                 break;
             case Param::FD:
-                result_processors.push_back(std::unique_ptr<ResultProcessor>(new FdProcessor(result)));
+                result_processors.push_back(std::unique_ptr<ResultProcessor>(new FdProcessor));
                 break;
             case Param::UNKNOWN:
                 break;
@@ -170,7 +155,7 @@ public:
     Registrar(int syscall_number) 
     { 
         std::cerr << "Register " <<  "(" << syscall_number << ")" << std::endl;
-        SyscallMarshallRegistry::Register(syscall_number, [](long raw_args[6], long int* result){ return new T(raw_args, result); });
+        SyscallMarshallRegistry::Register(syscall_number, [](long raw_args[6]){ return new T(raw_args); });
     }
 };
 
@@ -187,32 +172,32 @@ void SyscallMarshallRegistry::Register(long syscall_number, FactoryFunc factory_
 void SyscallMarshallRegistry::Register(const SyscallSpec& spec)
 {
     std::cerr << "Register " << spec.name() << "(" << spec.num() << ")" << std::endl;
-    Register(spec.num(), [spec](long raw_args[6], long int* result){ return new DynamicMarshall(spec, raw_args, result); });
+    Register(spec.num(), [spec](long raw_args[6]){ return new DynamicMarshall(spec, raw_args); });
 }
 
-SyscallMarshall* SyscallMarshallRegistry::New(long syscall_number, long raw_args[6], long int* result)
+SyscallMarshall* SyscallMarshallRegistry::New(long syscall_number, long raw_args[6])
 {
     auto& registry = *Get();
     auto factory_func = registry.find((int)syscall_number);
     if (factory_func == registry.end()) {
         return nullptr;
     } else {
-        return (factory_func->second)(raw_args, result);
+        return (factory_func->second)(raw_args);
     }
 }
 
-void SyscallMarshall::ProcessResponse(const ElevationResponse& response) 
+long int SyscallMarshall::ProcessResponse(const ElevationResponse& response) 
 { 
-    *result = -response.errno_code();
+    long int result = -response.errno_code();
     if (response.results_size() > (int)result_processors.size()) {
-        *result = -1;
-        return;
+        return -1;
     }
     for (int i = 0; i < response.results_size(); ++i) {
-        if (!result_processors[i]->Process(response.results(i))) {
-            *result = -1;
+        if (!result_processors[i]->Process(response.results(i), &result)) {
+            return -1;
         }
     }
+    return result;
 }
 
 }  // namespace guardian_agent

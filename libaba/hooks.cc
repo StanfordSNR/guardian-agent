@@ -191,7 +191,7 @@ static void hook(long syscall_number, long raw_args[6], long int* result)
     Operation op;
     std::vector<int> fds;
     op.set_syscall_num(syscall_number);
-    std::unique_ptr<SyscallMarshall> marshall(SyscallMarshallRegistry::New(syscall_number, raw_args, result));
+    std::unique_ptr<SyscallMarshall> marshall(SyscallMarshallRegistry::New(syscall_number, raw_args));
     if (marshall == nullptr) {
             std::cerr << "Error: unexpected intercepted syscall: " << syscall_number << std::endl;
             return;
@@ -236,7 +236,7 @@ static void hook(long syscall_number, long raw_args[6], long int* result)
         return;
     }
 
-    marshall->ProcessResponse(elevation_response);
+    *result = marshall->ProcessResponse(elevation_response);
 }
 
 
