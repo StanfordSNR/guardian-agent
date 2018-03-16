@@ -1,6 +1,7 @@
 package guardianagent
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 )
@@ -11,8 +12,57 @@ type Policy struct {
 }
 
 func CredentialRequestToString(scope Scope, req *CredentialRequest) string {
-	return fmt.Sprintf("request by %s to call '%s' on %s as root",
-		scope.ClientName, req.GetOp(), req.GetChallenge().ServerHostname)
+	str := req.GetOp().String()
+
+	var spec *SyscallSpec
+	syscallsConf, err := GetSyscallConfig()
+	if err == nil {
+		for i := range syscallsConf.GetSyscall() {
+			if syscallsConf.Syscall[i].GetNum() == req.GetOp().GetSyscallNum() {
+				spec = syscallsConf.Syscall[i]
+			}
+		}
+	}
+	if spec != nil {
+		str = spec.Name + "("
+	} else {
+		str = fmt.Sprintf("syscall #%d (", req.GetOp().SyscallNum)
+	}
+	cwdSuffix := ""
+	args := req.GetOp().GetArgs()
+	if spec.GetAddFdCwd() {
+		cwdSuffix = fmt.Sprintf("\nrelative to dir: %s", args[0].GetDirFdArg().GetPath())
+		args = args[1:]
+	}
+	for i, arg := range args {
+		if i < len(spec.GetParams()) {
+			str += spec.GetParams()[i].GetName() + ": "
+		}
+		switch arg := arg.Arg.(type) {
+		case *Argument_IntArg:
+			str += fmt.Sprintf("%d", arg.IntArg)
+		case *Argument_StringArg:
+			str += fmt.Sprintf("\"%s\"", arg.StringArg)
+		case *Argument_BytesArg:
+			bufPreview := hex.EncodeToString(arg.BytesArg)
+			if len(arg.BytesArg) > 20 {
+				bufPreview = hex.EncodeToString(arg.BytesArg[0:20]) + "..."
+			}
+			str += fmt.Sprintf("buffer of length %d [%s]", len(arg.BytesArg), bufPreview)
+		case *Argument_OutBufferArg:
+			str += fmt.Sprintf("buffer of length %d", arg.OutBufferArg.GetLen())
+		case *Argument_FdArg:
+			str += fmt.Sprintf("fd #%d", arg.FdArg.GetFd())
+		case *Argument_DirFdArg:
+			str += fmt.Sprintf("[%s]", arg.DirFdArg.GetPath())
+		}
+		if i < len(args)-1 {
+			str += ", "
+		}
+	}
+	str += ")" + cwdSuffix
+	return fmt.Sprintf("request by %s to call:\n\t%s\non %s as root",
+		scope.ClientName, str, req.GetChallenge().ServerHostname)
 }
 
 func (policy *Policy) RequestCredentialApproval(scope Scope, req *CredentialRequest) error {

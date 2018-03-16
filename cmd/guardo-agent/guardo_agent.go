@@ -513,6 +513,15 @@ func main() {
 	defer os.Remove(sockPath)
 	os.Chmod(sockPath, os.ModePerm)
 
+	conf, _ := ga.GetSyscallConfig()
+	names := []string{}
+	if conf != nil {
+		for _, spec := range conf.Syscall {
+			names = append(names, spec.GetName())
+		}
+	}
+	log.Printf("Loaded handlers for %v\n", names)
+
 	fmt.Fprintf(os.Stderr, "Listening on %s for incoming elevation requests...\n", unixAddr)
 
 	hostname, err := os.Hostname()

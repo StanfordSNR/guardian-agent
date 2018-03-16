@@ -93,8 +93,6 @@ public:
             default:
                 std::cerr << "Unexpected retval type: " << syscall_spec.retval() << std::endl;
         }
-
-        std::cerr << "Prepare " << syscall_spec.name() << std::endl;
         long raw_args[] = {arg0, arg1, arg2, arg3, arg4, arg5};
         if (syscall_spec.add_fd_cwd()) {
             args.Add()->mutable_dir_fd_arg()->set_fd(AT_FDCWD);            
@@ -104,19 +102,15 @@ public:
             const auto& param = syscall_spec.params(i);
             switch (param.type()) {
                 case Param::INT32:
-                    std::cerr << "Int param: " << raw_args[i] << std::endl;
                     args.Add()->set_int_arg(raw_args[i]);
                     break;
                 case Param::STRING:
-                    std::cerr << "String param: " << (const char*)raw_args[i] << std::endl;
                     args.Add()->set_string_arg((const char*)raw_args[i]);
                     break;
                 case Param::FD:
-                    std::cerr << "Fd param: " << raw_args[i] << std::endl;
                     args.Add()->mutable_fd_arg()->set_fd(raw_args[i]);
                     break;
                 case Param::DIR_FD:
-                    std::cerr << "DirFd param: " << raw_args[i] << std::endl;
                     args.Add()->mutable_dir_fd_arg()->set_fd(raw_args[i]);
                     break;
                 case Param::IN_BUFFER: {
@@ -127,7 +121,6 @@ public:
                             len = raw_args[len_param];
                         }
                     }
-                    std::cerr << "In buffer param len: " << len << std::endl;
                     args.Add()->set_bytes_arg(std::string((const char*)raw_args[i], len));
                     break;
                 }
@@ -139,7 +132,6 @@ public:
                             len = raw_args[len_param];
                         }
                     }
-                    std::cerr << "Out buffer param len: " << len << std::endl;
                     args.Add()->mutable_out_buffer_arg()->set_len(len);
                     result_processors.push_back(
                         std::unique_ptr<ResultProcessor>(new OutBufferProcessor((void*)raw_args[i], len)));

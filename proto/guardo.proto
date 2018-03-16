@@ -57,7 +57,7 @@ message Param {
 }
 
 message SyscallSpec {
-    uint32 num = 1;
+    int32 num = 1;
     string name = 2;
     Param.ParamType retval = 3;
     repeated Param params = 4;
