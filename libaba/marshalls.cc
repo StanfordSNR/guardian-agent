@@ -10,22 +10,6 @@ namespace guardian_agent {
 using google::protobuf::RepeatedPtrField;    
 namespace fs = std::experimental::filesystem;
 
-SyscallMarshall::Registry SyscallMarshall::registry;
-
-template<class T>
-class Registrar
-{
-public:
-    Registrar(int syscall_number) 
-    { 
-        assert(SyscallMarshall::registry.find(syscall_number) == SyscallMarshall::registry.end());
-        SyscallMarshall::registry[syscall_number] = []() { return new T; }; 
-    }
-};
-
-#define REGISTER_SYSCALL_MARSHAL(sycall_number, class_name) \
-static Registrar<class_name> register_##sycall_number(sycall_number);
-
 class FdProcessor : public ResultProcessor 
 {
 public:
@@ -89,8 +73,141 @@ private:
     size_t count;
 };
 
-SyscallMarshall* SyscallMarshall::New(long syscall_number, long arg0, long arg1, long arg2, long arg3, long arg4, long arg5, long int* result)
+class DynamicMarshall : public SyscallMarshall 
 {
+public:
+    DynamicMarshall(const SyscallSpec& spec)
+        : syscall_spec(spec) {}
+
+    void Prepare() 
+    {
+        std::cerr << "Prepare " << syscall_spec.name() << std::endl;
+        long raw_args[] = {arg0, arg1, arg2, arg3, arg4, arg5};
+        if (syscall_spec.add_fd_cwd()) {
+            args.Add()->mutable_fd_arg()->set_fd(AT_FDCWD);            
+        }
+
+        for (int i = 0; i < syscall_spec.params_size(); ++i) {
+            const auto& param = syscall_spec.params(i);
+            switch (param.type()) {
+                case Param::INT32:
+                    std::cerr << "Int param: " << raw_args[i] << std::endl;
+                    args.Add()->set_int_arg(raw_args[i]);
+                    break;
+                case Param::STRING:
+                    std::cerr << "String param: " << (const char*)raw_args[i] << std::endl;
+                    args.Add()->set_string_arg((const char*)raw_args[i]);
+                    break;
+                case Param::FD:
+                    std::cerr << "Fd param: " << raw_args[i] << std::endl;
+                    args.Add()->mutable_fd_arg()->set_fd(raw_args[i]);
+                    break;
+                case Param::DIR_FD:
+                    std::cerr << "DirFd param: " << raw_args[i] << std::endl;
+                    args.Add()->mutable_dir_fd_arg()->set_fd(raw_args[i]);
+                    break;
+                case Param::IN_BUFFER: {
+                    size_t len = param.const_len();
+                    if (param.len_param_name() != "") {
+                        int len_param = find_param(param.len_param_name());
+                        if (len_param >= 0) {
+                            len = raw_args[len_param];
+                        }
+                    }
+                    std::cerr << "In buffer param len: " << len << std::endl;
+                    args.Add()->set_bytes_arg(std::string((const char*)raw_args[i], len));
+                    break;
+                }
+                case Param::OUT_BUFFER: {
+                    size_t len = param.const_len();
+                    if (param.len_param_name() != "") {
+                        int len_param = find_param(param.len_param_name());
+                        if (len_param >= 0) {
+                            len = raw_args[len_param];
+                        }
+                    }
+                    std::cerr << "Out buffer param len: " << len << std::endl;
+                    args.Add()->mutable_out_buffer_arg()->set_len(len);
+                    result_processors.push_back(
+                        std::unique_ptr<ResultProcessor>(new OutBufferProcessor((void*)raw_args[i], len)));
+                    break;
+                }
+                default:
+                    std::cerr << "Unknown param type: %d" << param.type() << std::endl;
+            }
+        }
+
+        switch (syscall_spec.retval()) {
+            case Param::INT32:
+                result_processors.push_back(std::unique_ptr<ResultProcessor>(new IntProcessor(result)));
+                break;
+            case Param::FD:
+                result_processors.push_back(std::unique_ptr<ResultProcessor>(new FdProcessor(result)));
+                break;
+            case Param::UNKNOWN:
+                break;
+            default:
+                std::cerr << "Unexpected retval type: " << syscall_spec.retval() << std::endl;
+        }
+    }
+
+private:
+    int find_param(const std::string& name) 
+    {
+        for (int i = 0; i < syscall_spec.params_size(); ++i) {
+            if (syscall_spec.params(i).name() == name) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    SyscallSpec syscall_spec;
+};
+
+
+SyscallMarshallRegistry::Registry* SyscallMarshallRegistry::Get() 
+{
+    static Registry registry;
+    return &registry;
+}
+
+bool SyscallMarshallRegistry::IsRegistered(long syscall_number)
+{
+    auto& registry = *Get();
+    return (registry.find(syscall_number) != registry.end());
+}
+
+template<class T>
+class Registrar
+{
+public:
+    Registrar(int syscall_number) 
+    { 
+        std::cerr << "Register " <<  "(" << syscall_number << ")" << std::endl;
+        SyscallMarshallRegistry::Register(syscall_number, [](){ return new T; });
+    }
+};
+
+#define REGISTER_SYSCALL_MARSHAL(sycall_number, class_name) \
+static Registrar<class_name> register_##sycall_number(sycall_number);
+
+void SyscallMarshallRegistry::Register(long syscall_number, std::function<SyscallMarshall*()> factory_func) 
+{
+    auto& registry = *Get();
+    assert(registry.find(syscall_number) == registry.end());
+    registry[syscall_number] = factory_func;
+}
+
+void SyscallMarshallRegistry::Register(const SyscallSpec& spec)
+{
+    std::cerr << "Register " << spec.name() << "(" << spec.num() << ")" << std::endl;
+    Register(spec.num(), [spec](){ return new DynamicMarshall(spec); });
+}
+
+SyscallMarshall* SyscallMarshallRegistry::New(long syscall_number, long arg0, long arg1, long arg2, long arg3, long arg4, long arg5, long int* result)
+{
+    auto& registry = *Get();
     auto factory_func = registry.find((int)syscall_number);
     if (factory_func == registry.end()) {
         return nullptr;
@@ -137,274 +254,5 @@ public:
         T::Prepare();
     }
 };
-
-class OpenAtMarshall : public SyscallMarshall 
-{
-public:
-    void Prepare() 
-    {
-        args.Add()->mutable_dir_fd_arg()->set_fd(arg0);
-        args.Add()->set_string_arg((char*)arg1);
-        args.Add()->set_int_arg(arg2);
-        args.Add()->set_int_arg(arg3);
-        result_processors.push_back(std::unique_ptr<ResultProcessor>(new FdProcessor(result)));
-    }
-};
-REGISTER_SYSCALL_MARSHAL(SYS_openat, OpenAtMarshall)
-REGISTER_SYSCALL_MARSHAL(SYS_open, FromAtSyscall<OpenAtMarshall>)
-
-class MkdirAtMarshall : public SyscallMarshall 
-{
-public:
-    void Prepare() 
-    {
-        args.Add()->mutable_dir_fd_arg()->set_fd(arg0);
-        args.Add()->set_string_arg((char*)arg1);
-        args.Add()->set_int_arg(arg2);
-    }
-};
-REGISTER_SYSCALL_MARSHAL(SYS_mkdirat, MkdirAtMarshall)
-REGISTER_SYSCALL_MARSHAL(SYS_mkdir, FromAtSyscall<MkdirAtMarshall>)
-
-class SymlinkAtMarshall : public SyscallMarshall 
-{
-public:
-    void Prepare() 
-    {
-        args.Add()->set_string_arg((char*)arg0);
-        args.Add()->mutable_dir_fd_arg()->set_fd(arg1);
-        args.Add()->set_string_arg((char*)arg2);
-    }
-};
-REGISTER_SYSCALL_MARSHAL(SYS_symlinkat, SymlinkAtMarshall)
-
-class SymlinkMarshall : public SymlinkAtMarshall 
-{
-public:
-    void Prepare() 
-    {
-        arg2 = arg1;
-        arg1 = AT_FDCWD;
-        SymlinkAtMarshall::Prepare();
-    }
-};
-REGISTER_SYSCALL_MARSHAL(SYS_symlink, SymlinkMarshall)
-
-class UnlinkAtMarshall : public SyscallMarshall 
-{
-public:
-    void Prepare() 
-    {
-        args.Add()->mutable_dir_fd_arg()->set_fd(arg0);
-        args.Add()->set_string_arg((char*)arg1);
-        args.Add()->set_int_arg(arg2);
-    }
-};
-REGISTER_SYSCALL_MARSHAL(SYS_unlinkat, UnlinkAtMarshall)
-
-class UnlinkMarshall : public UnlinkAtMarshall 
-{
-public:
-    void Prepare() 
-    {
-        arg2 = 0;
-        arg1 = arg0;
-        arg0 = AT_FDCWD;
-        UnlinkAtMarshall::Prepare();
-    }
-};
-REGISTER_SYSCALL_MARSHAL(SYS_unlink, UnlinkMarshall)
-
-class RmdirMarshall : public UnlinkAtMarshall 
-{
-public:
-    void Prepare() 
-    {
-        arg2 = AT_REMOVEDIR;
-        arg1 = arg0;
-        arg0 = AT_FDCWD;
-        UnlinkAtMarshall::Prepare();
-    }
-};
-REGISTER_SYSCALL_MARSHAL(SYS_rmdir, RmdirMarshall)
-
-class FaccessAtMarshall : public SyscallMarshall 
-{
-public:
-    void Prepare() 
-    {
-        args.Add()->mutable_dir_fd_arg()->set_fd(arg0);
-        args.Add()->set_string_arg((char*)arg1);
-        args.Add()->set_int_arg(arg2);
-    }
-
-    bool ShouldHook() 
-    {
-        // Don't try to elevate executable access checks for files that
-        // are not executable at all. 
-        mode_t mode = (mode_t)arg2;
-        if (mode == X_OK) {
-            auto p = fs::status((char*)arg1).permissions();
-            if (((p & fs::perms::owner_exec) == fs::perms::none) &&
-                ((p & fs::perms::group_exec) == fs::perms::none) &&
-                ((p & fs::perms::others_exec) == fs::perms::none)) {
-                return false;
-            }
-        }
-        return true;
-    }
-};
-REGISTER_SYSCALL_MARSHAL(SYS_faccessat, FaccessAtMarshall)
-
-class AccessMarshall : public FaccessAtMarshall 
-{
-public:
-    void Prepare() 
-    {
-        arg2 = arg1;
-        arg1 = arg0;
-        arg0 = AT_FDCWD;
-        FaccessAtMarshall::Prepare();
-    }
-};
-REGISTER_SYSCALL_MARSHAL(SYS_access, AccessMarshall)
-
-class FstatAtMarshall : public SyscallMarshall 
-{
-public:
-    void Prepare() 
-    {
-        args.Add()->mutable_dir_fd_arg()->set_fd(arg0);
-        args.Add()->set_string_arg((char*)arg1);
-        args.Add()->mutable_out_buffer_arg()->set_len(sizeof(stat));
-        args.Add()->set_int_arg(arg3);
-        result_processors.push_back(
-            std::unique_ptr<ResultProcessor>(new OutBufferProcessor((void*)arg2, sizeof(stat))));
-    }
-};
-REGISTER_SYSCALL_MARSHAL(SYS_newfstatat, FstatAtMarshall)
-
-class StatMarshall : public FstatAtMarshall 
-{
-public:
-    void Prepare() 
-    {
-        arg3 = 0;
-        arg2 = arg1;
-        arg1 = arg0;
-        arg0 = AT_FDCWD;
-        FstatAtMarshall::Prepare();
-    }
-};
-REGISTER_SYSCALL_MARSHAL(SYS_stat, StatMarshall)
-
-class LstatMarshall : public FstatAtMarshall 
-{
-public:
-    void Prepare() 
-    {
-        arg3 = AT_SYMLINK_NOFOLLOW;
-        arg2 = arg1;
-        arg1 = arg0;
-        arg0 = AT_FDCWD;
-        FstatAtMarshall::Prepare();
-    }
-};
-REGISTER_SYSCALL_MARSHAL(SYS_lstat, LstatMarshall)
-
-class FstatMarshall : public SyscallMarshall 
-{
-public:
-    void Prepare() 
-    {
-        args.Add()->mutable_fd_arg()->set_fd(arg0);
-        args.Add()->mutable_out_buffer_arg()->set_len(sizeof(stat));
-        result_processors.push_back(
-            std::unique_ptr<ResultProcessor>(new OutBufferProcessor((void*)arg1, sizeof(stat))));
-    }
-};
-REGISTER_SYSCALL_MARSHAL(SYS_fstat, FstatMarshall)
-
-
-class ReadlinkAtMarshall : public SyscallMarshall 
-{
-public:
-    void Prepare() 
-    {
-        args.Add()->mutable_dir_fd_arg()->set_fd(arg0);
-        args.Add()->set_string_arg((char*)arg1);
-        args.Add()->mutable_out_buffer_arg()->set_len(arg3);
-        args.Add()->set_int_arg(arg3);
-        result_processors.push_back(
-            std::unique_ptr<ResultProcessor>(new IntProcessor(result)));
-        result_processors.push_back(
-            std::unique_ptr<ResultProcessor>(new OutBufferProcessor((void*)arg2, arg3)));
-    }
-};
-REGISTER_SYSCALL_MARSHAL(SYS_readlinkat, ReadlinkAtMarshall)
-REGISTER_SYSCALL_MARSHAL(SYS_readlink, FromAtSyscall<ReadlinkAtMarshall>)
-
-class RenameAt2Marshall : public SyscallMarshall 
-{
-public:
-    void Prepare() 
-    {
-        args.Add()->mutable_dir_fd_arg()->set_fd(arg0);
-        args.Add()->set_string_arg((char*)arg1);
-        args.Add()->mutable_dir_fd_arg()->set_fd(arg2);
-        args.Add()->set_string_arg((char*)arg3);
-        args.Add()->set_int_arg(arg4);
-    }
-};                     
-REGISTER_SYSCALL_MARSHAL(SYS_renameat2, RenameAt2Marshall)
-
-class RenameAtMarshall : public RenameAt2Marshall 
-{
-public:
-    void Prepare() 
-    {
-        arg4 = 0;
-        RenameAt2Marshall::Prepare();
-    }
-};
-REGISTER_SYSCALL_MARSHAL(SYS_renameat, RenameAtMarshall)
-
-class RenameMarshall : public RenameAtMarshall 
-{
-public:
-    void Prepare() 
-    {
-        arg3 = arg1;
-        arg2 = AT_FDCWD;
-        arg1 = arg0;
-        arg0 = AT_FDCWD;
-        RenameAtMarshall::Prepare();
-    }
-};
-REGISTER_SYSCALL_MARSHAL(SYS_rename, RenameMarshall)
-
-class SocketMarshall : public SyscallMarshall 
-{
-public:
-    void Prepare() 
-    {
-        args.Add()->set_int_arg(arg0);
-        args.Add()->set_int_arg(arg1);
-        args.Add()->set_int_arg(arg2);
-        result_processors.push_back(std::unique_ptr<ResultProcessor>(new FdProcessor(result)));
-    }
-};
-REGISTER_SYSCALL_MARSHAL(SYS_socket, SocketMarshall)
-
-class BindMarshall : public SyscallMarshall 
-{
-public:
-    void Prepare() 
-    {
-        args.Add()->mutable_fd_arg()->set_fd(arg0);
-        args.Add()->set_bytes_arg(std::string((const char*)arg1, arg2));
-    }
-};
-REGISTER_SYSCALL_MARSHAL(SYS_bind, BindMarshall)
 
 }  // namespace guardian_agent

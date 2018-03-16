@@ -3,6 +3,7 @@
 #include "marshalls.hh"
 #include "socket.hh"
 #include "util.hh"
+#include "proto/syscalls.hh"
 
 #include <arpa/inet.h>
 #include <cstdio>
@@ -14,6 +15,7 @@
 #include <libsyscall_intercept_hook_point.h>
 #include <syscall.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -152,6 +154,34 @@ bool get_credential(const Operation& op, const Challenge& challenge, Credential*
     return true;
 }
 
+bool skip_hook(long syscall_number, long arg0, long arg1, long arg2) 
+{
+    // Don't try to elevate executable access checks for files that
+    // are not executable at all. 
+    if ((syscall_number != SYS_access) && (syscall_number != SYS_faccessat)) {
+        return false;
+    }
+    struct stat statbuf;
+    memset(&statbuf, 0, sizeof(statbuf));
+    if (syscall_number == SYS_access) {
+        if (arg1 != X_OK) {
+            return false;
+        }
+        if (stat((char*)arg0, &statbuf) != 0) {
+            return false;
+        }
+    } else { // faccessat
+        if (arg2 != X_OK) {
+            return false;
+        }
+        if (fstatat(arg0, (char*)arg1, &statbuf, 0) != 0) {
+            return false;
+        }
+    }
+    auto p = statbuf.st_mode;
+    return (!(p & S_IXUSR) && !(p & S_IXGRP) && !(p & S_IXOTH));
+}
+
 static void hook(long syscall_number,
                  long arg0, 
                  long arg1,
@@ -161,17 +191,17 @@ static void hook(long syscall_number,
                  __attribute__((unused)) long arg5,
                 long int* result)
 {
+    if (skip_hook(syscall_number, arg0, arg1, arg2)) {
+        return;
+    }
+
     Operation op;
     std::vector<int> fds;
     op.set_syscall_num(syscall_number);
-    std::unique_ptr<SyscallMarshall> marshall(SyscallMarshall::New(syscall_number, arg0, arg1, arg2, arg3, arg4, arg5, result));
+    std::unique_ptr<SyscallMarshall> marshall(SyscallMarshallRegistry::New(syscall_number, arg0, arg1, arg2, arg3, arg4, arg5, result));
     if (marshall == nullptr) {
             std::cerr << "Error: unexpected intercepted syscall: " << syscall_number << std::endl;
             return;
-    }
-
-    if (!marshall->ShouldHook()) {
-        return;
     }
 
     *op.mutable_args() = marshall->GetArgs();
@@ -226,7 +256,7 @@ static int safe_hook(long syscall_number,
                      long arg5,
                      long *result)
 {
-    if (SyscallMarshall::registry.find(syscall_number) == SyscallMarshall::registry.end()) {
+    if (!SyscallMarshallRegistry::IsRegistered(syscall_number)) {
         return 1;
     }
 
@@ -253,4 +283,15 @@ init(void)
 {
 	// Set up the callback function
 	intercept_hook_point = guardian_agent::safe_hook;
+
+    guardian_agent::Syscalls syscalls;
+    if (!syscalls.ParseFromString(std::string(&_binary_syscalls_binproto_start, &_binary_syscalls_binproto_end - &_binary_syscalls_binproto_start))) {
+        std::cerr << "Failed to parse syscalls proto" << std::endl;
+    } else {
+        std::cerr << "Parsed " << syscalls.syscall_size() << " syscalls from proto" << std::endl;
+    }
+
+    for (const auto& spec : syscalls.syscall()) {
+        guardian_agent::SyscallMarshallRegistry::Register(spec);
+    }
 }

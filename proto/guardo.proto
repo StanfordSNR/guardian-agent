@@ -19,6 +19,7 @@ message OutBuffer {
     int32 len = 1;
 }
 
+
 message Argument {
     oneof arg {
         int32 int_arg = 1;
@@ -34,6 +35,40 @@ message Operation {
     int32 syscall_num = 1;
     repeated Argument args = 2;
 }
+
+
+message Param {
+    enum ParamType {
+        UNKNOWN = 0;
+        INT32 = 1;
+        STRING = 2;
+        DIR_FD = 3;
+        FD = 4;
+        IN_BUFFER = 5;
+        OUT_BUFFER = 6;
+    }
+    
+    ParamType type = 1;
+    string name = 2;
+    // For buffers
+    uint32 const_len = 3;
+    // zero based
+    string len_param_name = 4; 
+}
+
+message SyscallSpec {
+    uint32 num = 1;
+    string name = 2;
+    Param.ParamType retval = 3;
+    repeated Param params = 4;
+    bool add_fd_cwd = 5;
+}
+
+message Syscalls {
+    repeated SyscallSpec syscall = 1;
+}
+
+// API
 
 message CredentialRequest {
     Operation op = 1;
@@ -75,3 +110,4 @@ message ElevationResponse {
     int32 errno_code = 1;
     repeated Argument results = 2;
 }
+

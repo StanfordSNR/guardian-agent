@@ -125,9 +125,12 @@ func handleSocket(domain int32, typeArg int32, protocol int32) (*ga.Fd, error) {
 	return &ga.Fd{Fd: int32(fd)}, nil
 }
 
-func handleBind(sock *ga.Fd, addr []byte) error {
+func handleBind(sock *ga.Fd, addr []byte, addrlen int32) error {
 	_, _, err := syscall.Syscall(syscall.SYS_BIND, uintptr(sock.Fd), uintptr(unsafe.Pointer(&addr[0])), uintptr(len(addr)))
-	return err
+	if err != 0 {
+		return err
+	}
+	return nil
 }
 
 func (guardo *guardoAgent) checkCredential(req *ga.ElevationRequest, challenge *ga.Challenge) error {

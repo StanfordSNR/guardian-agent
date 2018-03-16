@@ -1,0 +1,374 @@
+syscall {
+    name: "open"
+    num: 2
+    retval: FD
+    add_fd_cwd : true
+    params {
+        name: "filename"
+        type: STRING
+    }
+    params { 
+        name: "flags"
+        type: INT32
+    }
+    params {
+        name: "mode"
+        type: INT32
+    }
+}
+
+syscall {
+    name: "openat"
+    num: 257
+    retval: FD
+    params {
+        name: "dir_fd"
+        type: DIR_FD
+    }
+    params {
+        name: "filename"
+        type: STRING
+    }
+    params {
+        name: "flags"
+        type: INT32
+    }
+    params {
+        name: "mode"
+        type: INT32
+    }
+}
+
+syscall {
+    name: "mkdir"
+    num: 83
+    add_fd_cwd: true
+    params {
+        name: "pathname"
+        type: STRING
+    }
+    params {
+        name: "flags"
+        type: INT32
+    }
+}
+
+syscall {
+    name: "mkdirat"
+    num: 258
+    params {
+        name: "dir_fd"
+        type: DIR_FD
+    }
+    params {
+        name: "pathname"
+        type: STRING
+    }
+    params {
+        name: "flags"
+        type: INT32
+    }
+}
+
+syscall {
+    name: "symlink"
+    num: 88
+    add_fd_cwd: true
+    params {
+        name: "oldname"
+        type: STRING
+    }
+    params {
+        name: "newname"
+        type: STRING
+    }
+}
+
+syscall {
+    name: "symlinkat"
+    num: 266
+    params {
+        name: "oldname"
+        type: STRING
+    }
+    params {
+        name: "newfd"
+        type: DIR_FD
+    }
+    params {
+        name: "newname"
+        type: STRING
+    }
+}
+
+syscall {
+    name: "unlink"
+    num: 87
+    add_fd_cwd: true
+    params {
+        name: "pathname"
+        type: STRING
+    }
+}
+
+syscall {
+    name: "unlinkat"
+    num: 263
+    params {
+        name: "dir_fd"
+        type: DIR_FD
+    }
+    params {
+        name: "pathname"
+        type: STRING
+    }
+    params {
+        name: "flags"
+        type: INT32
+    }
+}
+
+syscall {
+    name: "rmdir"
+    num: 84
+    add_fd_cwd: true
+    params {
+        name: "pathname"
+        type: STRING       
+    }
+}
+
+syscall {
+    name: "faccessat"
+    num: 269
+    params {
+        name: "dir_fd"
+        type: DIR_FD
+    }
+    params {
+        name: "filename"
+        type: STRING
+    }
+    params {
+        name: "mode"
+        type: INT32
+    }
+}
+
+syscall {
+    name: "access"
+    num: 21
+    add_fd_cwd: true
+    params {
+        name: "filename"
+        type: STRING
+    }
+    params {
+        name: "mode"
+        type: INT32
+    }
+}
+
+syscall {
+    name: "fstatat"
+    num: 262
+    params {
+        name: "dir_fd"
+        type: DIR_FD
+    }
+    params {
+        name: "filename"
+        type: STRING
+    }
+    params {
+        name: "statbuf"
+        type: OUT_BUFFER
+        const_len: 144 
+    }
+    params {
+        name: "flags"
+        type: INT32
+    }
+}
+
+syscall {
+    name: "stat"
+    num: 4
+    add_fd_cwd: true
+    params {
+        name: "filename"
+        type: STRING
+    }
+    params {
+        name: "statbuf"
+        type: OUT_BUFFER
+        const_len: 144 
+    }
+}
+
+syscall {
+    name: "lstat"
+    num: 6
+    add_fd_cwd: true
+    params {
+        name: "filename"
+        type: STRING
+    }
+    params {
+        name: "statbuf"
+        type: OUT_BUFFER
+        const_len: 144 
+    }
+}
+
+syscall {
+    name: "fstat"
+    num: 5
+    params {
+        name: "fd"
+        type: FD
+    }
+    params {
+        name: "statbuf"
+        type: OUT_BUFFER
+        const_len: 144 
+    }
+}
+
+syscall {
+    name: "readlinkat"
+    num: 267
+    params {
+        name: "dir_fd"
+        type: DIR_FD
+    }
+    params {
+        name: "pathname"
+        type: STRING
+    }
+    params {
+        name: "buf"
+        type: OUT_BUFFER
+        len_param_name: "bufsiz" 
+    }
+    params {
+        name: "bufsiz"
+        type: INT32
+    }
+}
+
+syscall {
+    name: "readlink"
+    num: 89
+    retval: INT32
+    add_fd_cwd: true
+    params {
+        name: "pathname"
+        type: STRING
+    }
+    params {
+        name: "buf"
+        type: OUT_BUFFER
+        len_param_name: "bufsiz" 
+    }
+    params {
+        name: "bufsiz"
+        type: INT32
+    }
+}
+
+syscall {
+    name: "renameat2"
+    num: 316
+    params {
+        name: "olddfd"
+        type: DIR_FD
+    }
+    params {
+        name: "oldname"
+        type: STRING
+    }
+    params {
+        name: "newdfd"
+        type: DIR_FD
+    }
+    params {
+        name: "newname"
+        type: STRING
+    }
+    params {
+        name: "flags"
+        type: INT32
+    }
+}
+
+syscall {
+    name: "renameat"
+    num: 264
+    params {
+        name: "olddfd"
+        type: DIR_FD
+    }
+    params {
+        name: "oldname"
+        type: STRING
+    }
+    params {
+        name: "newdfd"
+        type: DIR_FD
+    }
+    params {
+        name: "newname"
+        type: STRING
+    }
+}
+
+syscall {
+    name: "rename"
+    num: 82
+    add_fd_cwd: true
+    params {
+        name: "oldname"
+        type: STRING
+    }
+    params {
+        name: "newname"
+        type: STRING
+    }
+}
+
+syscall {
+    name: "socket"
+    num: 41
+    retval: FD
+    params {
+        name: "family"
+        type: INT32
+    }
+    params {
+        name: "type"
+        type: INT32
+    }
+    params {
+        name: "protocol"
+        type: INT32
+    }
+}
+
+syscall {
+    name: "bind"
+    num: 49
+    params {
+        name: "fd"
+        type: FD
+    }
+    params {
+        name: "umyaddr"
+        type: IN_BUFFER
+        len_param_name: "addrlen"
+    }
+    params {
+        name: "addrlen"
+        type: INT32
+    }
+}
