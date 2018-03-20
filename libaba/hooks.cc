@@ -52,7 +52,6 @@ std::unique_ptr<FileDescriptor> marshal_fds(Operation* op, std::vector<int>* fds
         } else if (arg.has_fd_arg()) {
             Fd* fd = arg.mutable_fd_arg();
             fds->push_back(fd->fd());
-            fd->clear_fd();
         }   
     }
 
