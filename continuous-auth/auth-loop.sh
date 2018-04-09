@@ -13,20 +13,21 @@ function ssh-kill {
 }
 
 function mux {
-    SOCKET="/tmp/socket"
+    SOCKET="$(mktemp /tmp/cont-auth-socket.XXXXXX)"
     PIPE=$SOCKET-pipe
     mkfifo $PIPE &> /dev/null
     rm $SOCKET &> /dev/null     # take this out when dynamically choose
     nohup nc -lU $SOCKET -k < $PIPE | nc localhost 22 > $PIPE & 
-    echo $SOCKET 
+    echo "$SOCKET" 
 }
 
 function cleanup {
     SOCKET=$1
-    PIPE=$1-pipe
+    PIPE=$2
     kill $(ps aux | grep "nc -lU $1 -k < $PIPE" | grep -v grep | awk '{print $2}') &> /dev/null
     kill $(ps aux | grep "nc localhost 22 > $PIPE" | grep -v grep | awk '{print $2}') &> /dev/null
     rm $SOCKET
+    rm $PIPE
 }
 
 SOCKET="$(ssh -q -i $auth_key_cert -o BatchMode=yes $PRINCIPAL@$HOST "$(typeset -f); mux" < /dev/null)"
@@ -43,5 +44,5 @@ do
         fi
     fi
 done
-ssh -q -i $auth_key_cert -o BatchMode=yes $PRINCIPAL@$HOST "$(typeset -f); cleanup $SOCKET"
+ssh -q -i $auth_key_cert -o BatchMode=yes $PRINCIPAL@$HOST "$(typeset -f); cleanup $SOCKET $PIPE"
 
