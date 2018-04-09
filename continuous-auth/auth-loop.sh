@@ -1,5 +1,5 @@
-auth_key_cert="$HOME/.ssh/auth-key-cert.pub"
-token_lib="/usr/local/lib/libykcs11_NOTALINK.dylib"
+AUTH_KEY_CERT="$HOME/.ssh/auth-key-cert.pub"
+TOKEN_LIB="/usr/local/lib/libykcs11_NOTALINK.dylib"
 PRINCIPAL=$1
 HOST=$2
 
@@ -30,19 +30,19 @@ function cleanup {
     rm $PIPE
 }
 
-SOCKET="$(ssh -q -i $auth_key_cert -o BatchMode=yes $PRINCIPAL@$HOST "$(typeset -f); mux" < /dev/null)"
-ssh-kill "ssh -q -i $auth_key_cert -o BatchMode=yes -o ConnectTimeout=5s $1@$2 nc -U $SOCKET" &
+SOCKET="$(ssh -q -i $AUTH_KEY_CERT -o BatchMode=yes $PRINCIPAL@$HOST "$(typeset -f); mux" < /dev/null)"
+ssh-kill "ssh -q -i $AUTH_KEY_CERT -o BatchMode=yes -o ConnectTimeout=5s $1@$2 nc -U $SOCKET" &
 while kill -0 $PPID > /dev/null
 do
-	if ! ssh -q -i $auth_key_cert -o BatchMode=yes -o ConnectTimeout=5s $1@$2 nc -U $SOCKET
+	if ! ssh -q -i $AUTH_KEY_CERT -o BatchMode=yes -o ConnectTimeout=5s $1@$2 nc -U $SOCKET
     then
         sleep 1s   # wait to retry to see if key inserted
         if (lsusb | grep -q "Yubikey") &> /dev/null
         then
             eval `ssh-agent -s` > /dev/null
-            ssh-add -s $token_lib > /dev/null
+            ssh-add -s $TOKEN_LIB > /dev/null
         fi
     fi
 done
-ssh -q -i $auth_key_cert -o BatchMode=yes $PRINCIPAL@$HOST "$(typeset -f); cleanup $SOCKET $PIPE"
+ssh -q -i $AUTH_KEY_CERT -o BatchMode=yes $PRINCIPAL@$HOST "$(typeset -f); cleanup $SOCKET $PIPE"
 
