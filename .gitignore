@@ -45,3 +45,4 @@ Makefile.in
 /guardo.pb.go
 /guardo/guardo.pb.go
 /guardian_agent.pb.go
+/proto/syscalls.binproto

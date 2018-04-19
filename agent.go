@@ -22,6 +22,7 @@ type InputType uint8
 const (
 	Terminal = iota
 	Display
+	Console
 )
 
 type Agent struct {
@@ -39,7 +40,18 @@ func NewGuardian(policyConfigPath string, inType InputType) (*Agent, error) {
 		ui = &FancyTerminalUI{}
 		break
 	case Display:
-		ui = &AskPassUI{}
+		binary := os.Getenv("SSH_ASKPASS")
+		if binary == "" {
+			binary = "ssh-askpass"
+		}
+		ui = &AskPassUI{Binary: binary}
+		break
+	case Console:
+		binary := os.Getenv("SSH_ASKPASS")
+		if binary == "" {
+			binary = "vc-askpass"
+		}
+		ui = &AskPassUI{Binary: binary}
 	}
 
 	// get policy store
@@ -243,6 +255,9 @@ func writeCredentialResponse(conn net.Conn, resp *CredentialResponse) error {
 
 func (agent *Agent) signCredential(cred *Credential) error {
 	signers := getSigners(agent.policy.UI)
+	if len(signers) == 0 {
+		return fmt.Errorf("No valid signature keys")
+	}
 	signer := signers[0]
 	nonce := make([]byte, 32)
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {

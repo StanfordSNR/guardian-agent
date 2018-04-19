@@ -174,14 +174,18 @@ func (fwd *SSHFwd) Accept() (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
+	notice := AgentForwardingNoticeMsg{ReadableName: fwd.RemoteReadableName, Host: fwd.host, Port: fwd.port}
+	return AddNotice(client, notice)
+}
+
+func AddNotice(client net.Conn, notice AgentForwardingNoticeMsg) (net.Conn, error) {
 	clientPipe, agentPipe := net.Pipe()
 	go func() {
 		io.Copy(client, clientPipe)
 		client.Close()
 	}()
 	go func() {
-		msg := AgentForwardingNoticeMsg{ReadableName: fwd.RemoteReadableName, Host: fwd.host, Port: fwd.port}
-		if err = WriteControlPacket(clientPipe, MsgNum_AGENT_FORWARDING_NOTICE, ssh.Marshal(msg)); err != nil {
+		if err := WriteControlPacket(clientPipe, MsgNum_AGENT_FORWARDING_NOTICE, ssh.Marshal(notice)); err != nil {
 			log.Printf("Failed to send message to agent: %s", err)
 			return
 		}
@@ -193,11 +197,12 @@ func (fwd *SSHFwd) Accept() (net.Conn, error) {
 	}()
 
 	return agentPipe, nil
+
 }
 
-func (fwd *SSHFwd) Close() {
+func (fwd *SSHFwd) Close() error {
 	child := exec.Command(fwd.sshProgram, append(fwd.sshArgs, "-O exit")...)
 	child.Run()
 	os.Remove(fwd.localSocket)
-	fwd.listener.Close()
+	return fwd.listener.Close()
 }

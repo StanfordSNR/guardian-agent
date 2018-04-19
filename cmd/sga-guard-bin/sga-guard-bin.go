@@ -6,18 +6,40 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path"
 	"runtime"
 	"strings"
+	"syscall"
 
+	"github.com/BurntSushi/toml"
 	guardianagent "github.com/StanfordSNR/guardian-agent"
 	flags "github.com/jessevdk/go-flags"
 )
 
 const debugClient = true
 
+const configPath = "/etc/security/guardian-agent"
+
+type Config struct {
+	SSHAgent  string
+	SSHAdd    string
+	AskPass   string
+	PKCS11Lib string
+}
+
+var (
+	defaultConfig = Config{
+		SSHAgent:  "/usr/bin/ssh-agent",
+		SSHAdd:    "/usr/bin/ssh-add",
+		AskPass:   "/usr/bin/console-askpass",
+		PKCS11Lib: "/usr/local/lib/opensc-pkcs11.so",
+	}
+)
+
 type SSHCommand struct {
-	UserHost string `required:"true" positional-arg-name:"[user@]hostname"`
+	UserHost string `positional-arg-name:"[user@]hostname"`
 }
 
 type options struct {
@@ -29,9 +51,14 @@ type options struct {
 
 	RemoteStubName string `long:"stub" description:"Remote stub executable path" default:"$SHELL -l -c \"exec sga-stub\""`
 
-	PromptType string `long:"prompt" description:"Type of prompt to use." choice:"DISPLAY" choice:"TERMINAL" default:"DISPLAY"`
+	PromptType string `long:"prompt" description:"Type of prompt to use." choice:"DISPLAY" choice:"TERMINAL" choice:"CONSOLE" default:"DISPLAY"`
 
-	SSHCommand SSHCommand `positional-args:"true" required:"true"`
+	SSHCommand SSHCommand `positional-args:"true"`
+}
+
+type incomingListener interface {
+	Accept() (net.Conn, error)
+	Close() error
 }
 
 func main() {
@@ -72,6 +99,11 @@ func main() {
 		log.SetOutput(ioutil.Discard)
 	}
 
+	var conf Config
+	if _, err := toml.DecodeFile(configPath, &conf); err != nil {
+		conf = defaultConfig
+	}
+
 	opts.PolicyConfig = os.ExpandEnv(opts.PolicyConfig)
 	var ag *guardianagent.Agent
 	if opts.PromptType == "DISPLAY" {
@@ -85,19 +117,72 @@ func main() {
 	if opts.PromptType == "TERMINAL" {
 		ag, err = guardianagent.NewGuardian(opts.PolicyConfig, guardianagent.Terminal)
 	}
+	if opts.PromptType == "CONSOLE" {
+		ag, err = guardianagent.NewGuardian(opts.PolicyConfig, guardianagent.Console)
+	}
+
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(255)
 	}
-	sshFwd := guardianagent.NewSSHFwd(opts.SSHProgram, sshOptions, opts.SSHCommand.UserHost, opts.RemoteStubName)
 
-	fmt.Fprintf(os.Stderr, "Setting up forwarding...\n")
-	if err = sshFwd.SetupForwarding(); err != nil {
-		fmt.Fprintf(os.Stderr, "%s", err)
-		os.Exit(255)
+	var listener incomingListener
+	if opts.SSHCommand.UserHost != "" {
+		sshFwd := guardianagent.NewSSHFwd(opts.SSHProgram, sshOptions, opts.SSHCommand.UserHost, opts.RemoteStubName)
+
+		fmt.Fprintf(os.Stderr, "Setting up forwarding...\n")
+		if err = sshFwd.SetupForwarding(); err != nil {
+			fmt.Fprintf(os.Stderr, "%s", err)
+			os.Exit(255)
+		}
+
+		fmt.Fprintf(os.Stderr, "Forwarding to %s setup successfully. Waiting for incoming requests...\n", sshFwd.RemoteReadableName)
+		listener = sshFwd
+	} else {
+		euid := syscall.Geteuid()
+		ruid := syscall.Getuid()
+		syscall.Setreuid(euid, euid)
+
+		tempDir, err := ioutil.TempDir(guardianagent.UserTempDir(), "ssh-agent")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to create tempdir ssh-agent: %s", err)
+			os.Exit(255)
+		}
+		agentSockPath := path.Join(tempDir, "ssh-agent-sock")
+		realAgent := exec.Command(conf.SSHAgent, "-a", agentSockPath)
+		realAgent.Env = []string{}
+		output, err := realAgent.CombinedOutput()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to run ssh-agent: %s, %s", err, output)
+			os.Exit(255)
+		}
+		os.Setenv("SSH_AUTH_SOCK", agentSockPath)
+
+		sshAdd := exec.Command(conf.SSHAdd, "-s", conf.PKCS11Lib)
+		sshAdd.Env = []string{fmt.Sprintf("SSH_ASKPASS=%s", conf.AskPass), fmt.Sprintf("SSH_AUTH_SOCK=%s", agentSockPath), "DISPLAY="}
+
+		sshAdd.Stdin = nil
+		output, err = sshAdd.CombinedOutput()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to run ssh-add: %s, %s", err, output)
+			os.Exit(255)
+		}
+
+		syscall.Setreuid(ruid, euid)
+
+		rawListener, bindAddr, err := guardianagent.CreateSocket("")
+		os.Chown(bindAddr, os.Getuid(), os.Getegid())
+		listener = guardianagent.UDSListener{rawListener}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to listen on socket %s: %s", bindAddr, err)
+			os.Exit(255)
+		}
+		err = guardianagent.CreatAgentGuardSocketLink(bindAddr)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to create permanent guardian agent socket: %s", err)
+			os.Exit(255)
+		}
 	}
-
-	fmt.Fprintf(os.Stderr, "Forwarding to %s setup successfully. Waiting for incoming requests...\n", sshFwd.RemoteReadableName)
 
 	ints := make(chan os.Signal, 1)
 	signal.Notify(ints, os.Interrupt)
@@ -106,13 +191,13 @@ func main() {
 		for range ints {
 			fmt.Fprintf(os.Stderr, "Got Interrupt signal, shutting down...\n")
 			shutdown = true
-			sshFwd.Close()
+			listener.Close()
 		}
 	}()
 
 	var c net.Conn
 	for {
-		c, err = sshFwd.Accept()
+		c, err = listener.Accept()
 		if shutdown {
 			fmt.Fprintln(os.Stderr, "Shutdown complete\n")
 			os.Exit(0)

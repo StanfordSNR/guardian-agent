@@ -19,6 +19,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"syscall"
 
 	flags "github.com/jessevdk/go-flags"
 	"golang.org/x/crypto/ssh"
@@ -184,6 +185,22 @@ func UserHomeDir() string {
 
 func UserSshDir() string {
 	return path.Join(UserHomeDir(), ".ssh")
+}
+
+func CreatAgentGuardSocketLink(tempSocket string) error {
+	permanentSocket := path.Join(UserRuntimeDir(), AgentGuardSockName)
+
+	if _, err := os.Lstat(permanentSocket); err == nil {
+		err = os.Remove(permanentSocket)
+		if err != nil {
+			return fmt.Errorf("Failed to remove old permanent socket: %s", err)
+		}
+	}
+
+	if err := os.Symlink(tempSocket, permanentSocket); err != nil {
+		return fmt.Errorf("Failed to create symlink %s --> %s : %s", permanentSocket, tempSocket, err)
+	}
+	return nil
 }
 
 type CommonOptions struct {
@@ -403,4 +420,18 @@ func ResolveHostParams(sshProgram string, sshArgs []string) (host string, port u
 		}
 	}
 	return
+}
+
+func GetUcred(conn *net.UnixConn) *syscall.Ucred {
+	f, err := conn.File()
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	cred, err := syscall.GetsockoptUcred(int(f.Fd()), syscall.SOL_SOCKET, syscall.SO_PEERCRED)
+	if err != nil {
+		return nil
+	}
+	return cred
 }

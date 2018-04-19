@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/howeyc/gopass"
 	i "github.com/sternhenri/interact"
@@ -24,7 +25,9 @@ type UI interface {
 type FancyTerminalUI struct {
 	mu sync.Mutex
 }
-type AskPassUI struct{}
+type AskPassUI struct {
+	Binary string
+}
 
 type Prompt struct {
 	Question string
@@ -108,14 +111,19 @@ func (tui *FancyTerminalUI) Confirm(msg string) bool {
 	return err == nil && ans == 1
 }
 
-func (AskPassUI) Ask(params Prompt) (reply int, err error) {
+func (ui AskPassUI) Ask(params Prompt) (reply int, err error) {
 	reply = -1
 	var convErr error
 
 	for convErr != nil || reply <= 0 || reply > len(params.Choices) { // 1 indexed
-		cmd := exec.Command("ssh-askpass", formatPrompt(params))
+		euid := syscall.Geteuid()
+		ruid := syscall.Getuid()
+		syscall.Setreuid(euid, euid)
+		cmd := exec.Command(ui.Binary, formatPrompt(params))
 		out, err := cmd.Output()
+		syscall.Setreuid(ruid, euid)
 		if err != nil {
+			fmt.Printf("%s\n", err)
 			return reply, err
 		}
 		sReply := strings.TrimSpace(string(out))

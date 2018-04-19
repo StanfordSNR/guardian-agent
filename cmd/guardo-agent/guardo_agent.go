@@ -43,20 +43,6 @@ func (opts *options) GetVersion() bool {
 	return opts.Version
 }
 
-func getUcred(conn *net.UnixConn) *syscall.Ucred {
-	f, err := conn.File()
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-
-	cred, err := syscall.GetsockoptUcred(int(f.Fd()), syscall.SOL_SOCKET, syscall.SO_PEERCRED)
-	if err != nil {
-		return nil
-	}
-	return cred
-}
-
 func verifyFileDescriptorPath(fd int, path string) error {
 	if !filepath.IsAbs(path) {
 		return fmt.Errorf("DirFd path must be absolute")
@@ -179,11 +165,14 @@ func (guardo *guardoAgent) checkCredential(req *ga.ElevationRequest, challenge *
 		return fmt.Errorf("Invalid server public key")
 	}
 
+	pk, err := ssh.ParsePublicKey(cred.GetSignatureKey())
+	if err != nil {
+		return fmt.Errorf("Failed to parse credential public key: %s", err)
+	}
 	if !guardo.authorizedKeys[string(cred.GetSignatureKey())] {
-		return fmt.Errorf("Unauthorized public key")
+		return fmt.Errorf("Unauthorized public key (%s)", pk.Type())
 	}
 
-	pk, err := ssh.ParsePublicKey(cred.GetSignatureKey())
 	credNoSig := *cred
 	credNoSig.Signature = nil
 	credNoSig.SignatureFormat = ""
@@ -467,7 +456,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(255)
 		}
-
+		log.Printf("Authorized key: %s \n", pubKey.Type())
 		authorizedKeysMap[string(pubKey.Marshal())] = true
 		authorizedKeysBytes = rest
 	}
@@ -541,7 +530,7 @@ func main() {
 			os.Exit(255)
 		}
 		go func() {
-			ucred := getUcred(c)
+			ucred := ga.GetUcred(c)
 			var err error
 			fmt.Fprintf(os.Stderr, "\n>>> Got connection from uid: %d, pid: %d\n", ucred.Uid, ucred.Pid)
 			err = guardo.handleConnection(c)

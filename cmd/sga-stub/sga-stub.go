@@ -26,17 +26,8 @@ func main() {
 		log.Fatalf("Failed to find forwarded socket: %s", err)
 	}
 
-	permanentSocket := path.Join(guardianagent.UserRuntimeDir(), guardianagent.AgentGuardSockName)
-
-	if _, err := os.Lstat(permanentSocket); err == nil {
-		err = os.Remove(permanentSocket)
-		if err != nil {
-			log.Fatalf("Failed to remove old permanent socket: %s", err)
-		}
-	}
-
-	if err := os.Symlink(tempSocket, permanentSocket); err != nil {
-		log.Fatalf("Failed to create symlink %s --> %s : %s", permanentSocket, tempSocket, err)
+	if err = guardianagent.CreatAgentGuardSocketLink(tempSocket); err != nil {
+		log.Fatal(err)
 	}
 	fmt.Println("OK")
 	reader.ReadLine()
