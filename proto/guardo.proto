@@ -31,9 +31,16 @@ message Argument {
     }
 }
 
+message Process {
+    uint32 pid = 1;
+    string cmdline = 2;
+    uint32 ppid = 3;
+}
+
 message Operation {
     int32 syscall_num = 1;
     repeated Argument args = 2;
+    Process caller = 3;
 }
 
 

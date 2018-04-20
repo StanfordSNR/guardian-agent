@@ -12,6 +12,8 @@
 #include <errno.h>
 #include <experimental/filesystem>
 #include <fcntl.h>
+#include <fstream>
+#include <iostream>
 #include <libsyscall_intercept_hook_point.h>
 #include <syscall.h>
 #include <sys/socket.h>
@@ -133,7 +135,6 @@ bool get_credential(const Operation& op, const Challenge& challenge, Credential*
 {
     UnixSocket socket;
     socket.connect(Address::NewUnixAddress(user_runtime_dir() / AGENT_GUARD_SOCK_NAME));
-
     CredentialRequest request;
     *request.mutable_op() = op;
     *request.mutable_challenge() = challenge;
@@ -150,6 +151,30 @@ bool get_credential(const Operation& op, const Challenge& challenge, Credential*
     }
 
     *credential = response.credential();
+    return true;
+}
+
+bool get_myself(Process* myself)
+{
+    std::ifstream in("/proc/self/cmdline");
+ 
+	if(!in)	{
+        std::cerr << "Failed to read /proc/self/cmdline" << std::endl;
+		return false;
+	}
+ 
+	std::string cmdline;
+    while (!in.eof())
+	{
+        std::string arg;
+        std::getline(in, arg, '\0');
+        cmdline += " " + arg;
+	}
+	in.close();
+
+    myself->set_pid(getpid());
+    myself->set_cmdline(cmdline);
+    myself->set_ppid(getppid());
     return true;
 }
 
@@ -197,6 +222,9 @@ static void hook(long syscall_number, long raw_args[6], long int* result)
     }
 
     *op.mutable_args() = marshall->GetArgs();
+    if (!get_myself(op.mutable_caller())) {
+        return;
+    }
 
     auto fd_cwd = marshal_fds(&op, &fds);
 
@@ -238,6 +266,7 @@ static void hook(long syscall_number, long raw_args[6], long int* result)
     *result = marshall->ProcessResponse(elevation_response);
 }
 
+thread_local bool in_hook = false; 
 
 static int safe_hook(long syscall_number,
                      long arg0, 
@@ -257,7 +286,12 @@ static int safe_hook(long syscall_number,
     if ((real_result != -EACCES) && (real_result != -EPERM)) {
         return 0;
     }
+    // avoid hook loops
+    if (in_hook) {
+        return 0;
+    }
 
+    in_hook = true;
     try {
         long raw_args[6] = {arg0, arg1, arg2, arg3, arg4, arg5};
         hook(syscall_number, raw_args, result);
@@ -266,6 +300,7 @@ static int safe_hook(long syscall_number,
     } catch (...) {
         std::cerr << "Unknown exeception caught in hook" << std::endl;
     }
+    in_hook = false;
     return 0;
 }
 

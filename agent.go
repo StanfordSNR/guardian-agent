@@ -135,7 +135,7 @@ func (agent *Agent) HandleConnection(conn net.Conn) error {
 			}
 			err = agent.handleCredentialRequest(conn, scope, credReq)
 			if err != nil {
-				agent.policy.UI.Inform("Error handling " + CredentialRequestToString(scope, credReq) + ": " + err.Error())
+				agent.policy.UI.Inform("Error handling CredentialRequest: " + err.Error())
 			}
 		case MsgNum_AGENTC_EXTENSION:
 			queryExtension := new(AgentCExtensionMsg)
@@ -222,11 +222,15 @@ func (agent *Agent) handleCredentialRequest(conn net.Conn, scope Scope, req *Cre
 		writeCredentialResponse(conn, &CredentialResponse{Status: CredentialResponse_DENIED})
 		return fmt.Errorf("request BLOCKED due to invalid challenge: %s", err)
 	}
-	originalTTY, err := FocusVT(NewVt)
-	if err != nil {
-		log.Printf("Failed to get focus: %s\n", err)
+	switch agent.policy.UI.(type) {
+	case *ConsoleUI:
+		originalTTY, err := FocusVT(NewVt)
+		if err != nil {
+			log.Printf("Failed to get focus: %s\n", err)
+		}
+		defer FocusVT(originalTTY)
+		break
 	}
-	defer FocusVT(originalTTY)
 
 	err = agent.policy.RequestCredentialApproval(scope, req)
 	if err != nil {
