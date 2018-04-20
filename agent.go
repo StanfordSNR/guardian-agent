@@ -47,11 +47,7 @@ func NewGuardian(policyConfigPath string, inType InputType) (*Agent, error) {
 		ui = &AskPassUI{Binary: binary}
 		break
 	case Console:
-		binary := os.Getenv("SSH_ASKPASS")
-		if binary == "" {
-			binary = "vc-askpass"
-		}
-		ui = &AskPassUI{Binary: binary}
+		ui = &ConsoleUI{&FancyTerminalUI{}}
 	}
 
 	// get policy store
@@ -226,6 +222,11 @@ func (agent *Agent) handleCredentialRequest(conn net.Conn, scope Scope, req *Cre
 		writeCredentialResponse(conn, &CredentialResponse{Status: CredentialResponse_DENIED})
 		return fmt.Errorf("request BLOCKED due to invalid challenge: %s", err)
 	}
+	originalTTY, err := FocusVT(NewVt)
+	if err != nil {
+		log.Printf("Failed to get focus: %s\n", err)
+	}
+	defer FocusVT(originalTTY)
 
 	err = agent.policy.RequestCredentialApproval(scope, req)
 	if err != nil {

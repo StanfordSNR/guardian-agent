@@ -3,12 +3,12 @@ package guardianagent
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 
 	"github.com/howeyc/gopass"
 	i "github.com/sternhenri/interact"
@@ -27,6 +27,10 @@ type FancyTerminalUI struct {
 }
 type AskPassUI struct {
 	Binary string
+}
+
+type ConsoleUI struct {
+	*FancyTerminalUI
 }
 
 type Prompt struct {
@@ -111,17 +115,23 @@ func (tui *FancyTerminalUI) Confirm(msg string) bool {
 	return err == nil && ans == 1
 }
 
+func (cui *ConsoleUI) Ask(params Prompt) (reply int, err error) {
+	originalTTY, err := FocusVT(NewVt)
+	if err != nil {
+		log.Printf("Failed to get focus: %s\n", err)
+	}
+	reply, err = cui.FancyTerminalUI.Ask(params)
+	FocusVT(originalTTY)
+	return
+}
+
 func (ui AskPassUI) Ask(params Prompt) (reply int, err error) {
 	reply = -1
 	var convErr error
 
 	for convErr != nil || reply <= 0 || reply > len(params.Choices) { // 1 indexed
-		euid := syscall.Geteuid()
-		ruid := syscall.Getuid()
-		syscall.Setreuid(euid, euid)
 		cmd := exec.Command(ui.Binary, formatPrompt(params))
 		out, err := cmd.Output()
-		syscall.Setreuid(ruid, euid)
 		if err != nil {
 			fmt.Printf("%s\n", err)
 			return reply, err

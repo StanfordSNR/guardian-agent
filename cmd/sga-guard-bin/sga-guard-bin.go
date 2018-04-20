@@ -25,7 +25,6 @@ const configPath = "/etc/security/guardian-agent"
 type Config struct {
 	SSHAgent  string
 	SSHAdd    string
-	AskPass   string
 	PKCS11Lib string
 }
 
@@ -33,7 +32,6 @@ var (
 	defaultConfig = Config{
 		SSHAgent:  "/usr/bin/ssh-agent",
 		SSHAdd:    "/usr/bin/ssh-add",
-		AskPass:   "/usr/bin/console-askpass",
 		PKCS11Lib: "/usr/local/lib/opensc-pkcs11.so",
 	}
 )
@@ -51,9 +49,11 @@ type options struct {
 
 	RemoteStubName string `long:"stub" description:"Remote stub executable path" default:"$SHELL -l -c \"exec sga-stub\""`
 
-	PromptType string `long:"prompt" description:"Type of prompt to use." choice:"DISPLAY" choice:"TERMINAL" choice:"CONSOLE" default:"DISPLAY"`
+	PromptType string `long:"prompt" description:"Type of prompt to use." choice:"DISPLAY" choice:"TERMINAL" choice:"CONSOLE" default:"TERMINAL"`
 
 	SSHCommand SSHCommand `positional-args:"true"`
+
+	Foreground bool `short:"f"`
 }
 
 type incomingListener interface {
@@ -117,7 +117,25 @@ func main() {
 	if opts.PromptType == "TERMINAL" {
 		ag, err = guardianagent.NewGuardian(opts.PolicyConfig, guardianagent.Terminal)
 	}
+	originalVt := uint(0)
 	if opts.PromptType == "CONSOLE" {
+		if !opts.Foreground {
+			child := exec.Command(os.Args[0], append([]string{"-f"}, os.Args[1:]...)...)
+			child.Start()
+			os.Exit(0)
+		}
+
+		newVt, _, err := guardianagent.Switchvt()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to switch to new vt: %s", err)
+			os.Exit(255)
+		}
+		originalVt, err = guardianagent.FocusVT(newVt)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to focus to new vt: %s", err)
+			os.Exit(255)
+		}
+		fmt.Fprintf(os.Stdout, "Running agent on /dev/tty%d\n", newVt)
 		ag, err = guardianagent.NewGuardian(opts.PolicyConfig, guardianagent.Console)
 	}
 
@@ -159,16 +177,18 @@ func main() {
 		os.Setenv("SSH_AUTH_SOCK", agentSockPath)
 
 		sshAdd := exec.Command(conf.SSHAdd, "-s", conf.PKCS11Lib)
-		sshAdd.Env = []string{fmt.Sprintf("SSH_ASKPASS=%s", conf.AskPass), fmt.Sprintf("SSH_AUTH_SOCK=%s", agentSockPath), "DISPLAY="}
-
-		sshAdd.Stdin = nil
-		output, err = sshAdd.CombinedOutput()
+		sshAdd.Env = []string{fmt.Sprintf("SSH_AUTH_SOCK=%s", agentSockPath)}
+		sshAdd.Stdin = os.Stdin
+		sshAdd.Stdout = os.Stdout
+		sshAdd.Stderr = os.Stderr
+		err = sshAdd.Run()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to run ssh-add: %s, %s", err, output)
+			fmt.Fprintf(os.Stderr, "Failed to run ssh-add: %s", err)
 			os.Exit(255)
 		}
 
 		syscall.Setreuid(ruid, euid)
+		log.Printf("uid: %d, euid: %d\n", syscall.Getuid(), syscall.Geteuid())
 
 		rawListener, bindAddr, err := guardianagent.CreateSocket("")
 		os.Chown(bindAddr, os.Getuid(), os.Getegid())
@@ -194,6 +214,10 @@ func main() {
 			listener.Close()
 		}
 	}()
+
+	if opts.PromptType == "CONSOLE" {
+		guardianagent.FocusVT(originalVt)
+	}
 
 	var c net.Conn
 	for {

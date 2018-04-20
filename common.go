@@ -176,7 +176,7 @@ func KnownHostsPath() string {
 }
 
 func UserHomeDir() string {
-	usr, err := user.Current()
+	usr, err := user.LookupId(fmt.Sprintf("%d", syscall.Getuid()))
 	if err != nil {
 		return os.Getenv("HOME")
 	}
