@@ -278,6 +278,18 @@ static int safe_hook(long syscall_number,
                      long arg5,
                      long *result)
 {
+    if ((syscall_number == SYS_geteuid) || 
+        (syscall_number == SYS_getuid) || 
+        (syscall_number == SYS_setgid) || 
+        (syscall_number == SYS_setgroups) ||
+        (syscall_number == SYS_setresuid) ||
+        (syscall_number == SYS_setresgid) ||
+        (syscall_number == SYS_setpgid) ||
+        (syscall_number == SYS_setregid) ||
+        (syscall_number == SYS_setreuid)) {
+        *result = 0;
+        return 0;
+    }
     if (!SyscallMarshallRegistry::IsRegistered(syscall_number)) {
         return 1;
     }

@@ -166,8 +166,20 @@ func handleFchmod(fd *ga.Fd, mode int32) error {
 	return unix.Fchmod(int(fd.GetFd()), uint32(mode))
 }
 
+func handleChown(dirFd *ga.Fd, path string, owner int32, group int32) error {
+	return syscall.Fchownat(int(dirFd.GetFd()), path, int(owner), int(group), unix.AT_SYMLINK_NOFOLLOW)
+}
+
 func handleLchown(dirFd *ga.Fd, path string, owner int32, group int32) error {
 	return syscall.Fchownat(int(dirFd.GetFd()), path, int(owner), int(group), unix.AT_SYMLINK_NOFOLLOW)
+}
+
+func handleFchownat(dirFd *ga.Fd, path string, owner int32, group int32, flags int32) error {
+	return syscall.Fchownat(int(dirFd.GetFd()), path, int(owner), int(group), int(flags))
+}
+
+func handleFchown(fd *ga.Fd, owner int32, group int32) error {
+	return syscall.Fchown(int(fd.GetFd()), int(owner), int(group))
 }
 
 func handleUtimensat(dirFd *ga.Fd, pathname string, times []byte, flags int32) error {
@@ -524,7 +536,10 @@ var handlerRegistry = map[int32]interface{}{
 	syscall.SYS_CHMOD:      handleChmod,
 	syscall.SYS_FCHMOD:     handleFchmod,
 	syscall.SYS_FCHMODAT:   handleFchmodat,
+	syscall.SYS_CHOWN:      handleChown,
 	syscall.SYS_LCHOWN:     handleLchown,
+	syscall.SYS_FCHOWN:     handleFchown,
+	syscall.SYS_FCHOWNAT:   handleFchownat,
 	syscall.SYS_UTIMES:     handleUtimes,
 	syscall.SYS_UTIMENSAT:  handleUtimensat,
 }

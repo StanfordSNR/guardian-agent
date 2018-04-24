@@ -376,6 +376,23 @@ syscall {
 }
 
 syscall {
+    name: "chown"
+    num: 92
+    params {
+         name: "pathname"
+         type: PATH
+    }
+    params {
+        name: "owner" 
+        type: INT32
+    }
+    params {
+        name: "group"
+        type: INT32
+    }
+}
+
+syscall {
     name: "lchown"
     num: 94
     params {
@@ -391,6 +408,49 @@ syscall {
         type: INT32
     }
 }
+
+syscall {
+    name: "fchown"
+    num: 93
+    params {
+         name: "fd"
+         type: FD
+    }
+    params {
+        name: "owner" 
+        type: INT32
+    }
+    params {
+        name: "group"
+        type: INT32
+    }
+}
+
+syscall {
+    name: "fchownat"
+    num: 260
+    params {
+        name: "dirfd"
+        type: FD
+    }
+    params {
+        name: "pathname"
+        type: PATH
+    }
+    params {
+        name: "owner" 
+        type: INT32
+    }
+    params {
+        name: "group"
+        type: INT32
+    }
+    params {
+        name: "flags"
+        type: INT32
+    }
+}
+
 
 syscall {
     name: "utimensat"
