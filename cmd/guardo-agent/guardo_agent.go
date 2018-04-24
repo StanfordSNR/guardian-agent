@@ -44,74 +44,75 @@ func (opts *options) GetVersion() bool {
 }
 
 func verifyFileDescriptorPath(fd int, path string) error {
-	if !filepath.IsAbs(path) {
-		return fmt.Errorf("DirFd path must be absolute")
-	}
-	pathFD, err := ga.OpenDirNoFollow(unix.AT_FDCWD, path)
-	if err != nil {
-		return err
-	}
-	var statPath unix.Stat_t
-	err = unix.Fstat(int(pathFD), &statPath)
-	if err != nil {
-		return errors.Wrapf(err, "Cannot stat %s", path)
-	}
 	var statFd unix.Stat_t
-	err = unix.Fstat(int(fd), &statFd)
+	err := unix.Fstat(int(fd), &statFd)
 	if err != nil {
 		return errors.Wrapf(err, "Cannot stat fd")
 	}
+	// Dont verify paths on sockets
+	if statFd.Mode&syscall.S_IFSOCK != 0 {
+		return nil
+	}
+
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("Fd path must be absolute")
+	}
+	var statPath unix.Stat_t
+	if err := ga.StatNoFollow(unix.AT_FDCWD, path, &statPath, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		return fmt.Errorf("Failed to verify path of fd: ", err)
+	}
+
 	if statPath.Dev == statFd.Dev && statPath.Ino == statFd.Ino {
 		return nil
 	}
 	return fmt.Errorf("File descriptor and path differ")
 }
 
-func handleOpen(dirFd *ga.DirFd, path string, flags int32, mode int32) (*ga.Fd, error) {
+func handleOpen(dirFd *ga.Fd, path string, flags int32, mode int32) (*ga.Fd, error) {
 	fd, err := ga.OpenNoFollow(int(dirFd.GetFd()), path, int(flags), uint32(mode))
 	if err != nil {
 		return nil, err
 	}
-	return &ga.Fd{Fd: int32(fd)}, nil
+	return &ga.Fd{Form: &ga.Fd_Fd{int32(fd)}}, nil
 }
 
-func handleMkdir(dirFd *ga.DirFd, path string, mode int32) error {
+func handleMkdir(dirFd *ga.Fd, path string, mode int32) error {
 	return ga.MkdirNoFollow(int(dirFd.GetFd()), path, uint32(mode))
 }
 
-func handleSymlinkAt(target string, dirFd *ga.DirFd, path string) error {
+func handleSymlinkAt(target string, dirFd *ga.Fd, path string) error {
 	return ga.SymlinkNoFollow(target, int(dirFd.GetFd()), path)
 }
 
-func handleSymlink(dirFd *ga.DirFd, target string, path string) error {
+func handleSymlink(dirFd *ga.Fd, target string, path string) error {
 	return handleSymlinkAt(target, dirFd, path)
 }
 
-func handleUnlinkAt(dirFd *ga.DirFd, path string, flags int32) error {
+func handleUnlinkAt(dirFd *ga.Fd, path string, flags int32) error {
 	return ga.UnlinkNoFollow(int(dirFd.GetFd()), path, int(flags))
 }
 
-func handleUnlink(dirFd *ga.DirFd, path string) error {
+func handleUnlink(dirFd *ga.Fd, path string) error {
 	return ga.UnlinkNoFollow(int(dirFd.GetFd()), path, 0)
 }
 
-func handleRmdir(dirFd *ga.DirFd, path string) error {
+func handleRmdir(dirFd *ga.Fd, path string) error {
 	return ga.UnlinkNoFollow(int(dirFd.GetFd()), path, unix.AT_REMOVEDIR)
 }
 
-func handleAccess(dirFd *ga.DirFd, path string, mode int32) error {
+func handleAccess(dirFd *ga.Fd, path string, mode int32) error {
 	return ga.AccessNoFollow(int(dirFd.GetFd()), path, uint32(mode))
 }
 
-func handleFstatat(dirFd *ga.DirFd, path string, statbuf []byte, flags int32) error {
+func handleFstatat(dirFd *ga.Fd, path string, statbuf []byte, flags int32) error {
 	return ga.StatNoFollow(int(dirFd.GetFd()), path, (*unix.Stat_t)(unsafe.Pointer(&statbuf[0])), int(flags))
 }
 
-func handleStat(dirFd *ga.DirFd, path string, statbuf []byte) error {
+func handleStat(dirFd *ga.Fd, path string, statbuf []byte) error {
 	return handleFstatat(dirFd, path, statbuf, 0)
 }
 
-func handleLstat(dirFd *ga.DirFd, path string, statbuf []byte) error {
+func handleLstat(dirFd *ga.Fd, path string, statbuf []byte) error {
 	return handleFstatat(dirFd, path, statbuf, unix.AT_SYMLINK_NOFOLLOW)
 }
 
@@ -119,20 +120,32 @@ func handleFstat(fd *ga.Fd, statbuf []byte) error {
 	return syscall.Fstat(int(fd.GetFd()), (*syscall.Stat_t)(unsafe.Pointer(&statbuf[0])))
 }
 
-func handleReadlink(dirFd *ga.DirFd, path string, buf []byte, bufSize int32) (int, error) {
+func handleReadlink(dirFd *ga.Fd, path string, buf []byte, bufSize int32) (int, error) {
 	return ga.ReadlinkNoFollow(int(dirFd.GetFd()), path, buf, int(bufSize))
 }
 
-func handleRenameAt2(oldDirFd *ga.DirFd, oldPath string, newDirFd *ga.DirFd, newPath string, flags int32) error {
+func handleRenameAt2(oldDirFd *ga.Fd, oldPath string, newDirFd *ga.Fd, newPath string, flags int32) error {
 	return ga.RenameNoFollow(int(oldDirFd.GetFd()), oldPath, int(newDirFd.GetFd()), newPath, int(flags))
 }
 
-func handleRenameAt(oldDirFd *ga.DirFd, oldPath string, newDirFd *ga.DirFd, newPath string) error {
+func handleRenameAt(oldDirFd *ga.Fd, oldPath string, newDirFd *ga.Fd, newPath string) error {
 	return handleRenameAt2(oldDirFd, oldPath, newDirFd, newPath, 0)
 }
 
-func handleRename(dirFd *ga.DirFd, oldPath string, newPath string) error {
+func handleRename(dirFd *ga.Fd, oldPath string, newPath string) error {
 	return handleRenameAt2(dirFd, oldPath, dirFd, newPath, 0)
+}
+
+func handleFchmodat(dirFd *ga.Fd, path string, mode int32, flags int32) error {
+	return ga.ChmodNoFollow(int(dirFd.GetFd()), path, uint32(mode), int(flags))
+}
+
+func handleChmod(dirFd *ga.Fd, path string, mode int32) error {
+	return handleFchmodat(dirFd, path, mode, 0)
+}
+
+func handleFchmod(fd *ga.Fd, mode int32) error {
+	return unix.Fchmod(int(fd.GetFd()), uint32(mode))
 }
 
 func handleSocket(domain int32, typeArg int32, protocol int32) (*ga.Fd, error) {
@@ -140,18 +153,18 @@ func handleSocket(domain int32, typeArg int32, protocol int32) (*ga.Fd, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ga.Fd{Fd: int32(fd)}, nil
+	return &ga.Fd{Form: &ga.Fd_Fd{int32(fd)}}, nil
 }
 
 func handleBind(sock *ga.Fd, addr []byte, addrlen int32) error {
-	_, _, err := syscall.Syscall(syscall.SYS_BIND, uintptr(sock.Fd), uintptr(unsafe.Pointer(&addr[0])), uintptr(len(addr)))
+	_, _, err := syscall.Syscall(syscall.SYS_BIND, uintptr(sock.GetFd()), uintptr(unsafe.Pointer(&addr[0])), uintptr(len(addr)))
 	if err != 0 {
 		return err
 	}
 	return nil
 }
 
-func (guardo *guardoAgent) checkCredential(req *ga.ElevationRequest, challenge *ga.Challenge) error {
+func (guardo *guardoAgent) checkCredential(req *ga.ElevationRequest, challenge *ga.Challenge, callerCred *syscall.Ucred) error {
 	cred := req.GetCredential()
 	if !proto.Equal(req.GetOp(), cred.GetOp()) {
 		return fmt.Errorf("Credential does not match requested operation, requested: %v, credential for: %v", req.GetOp(), cred.GetOp())
@@ -159,6 +172,20 @@ func (guardo *guardoAgent) checkCredential(req *ga.ElevationRequest, challenge *
 
 	if cred.GetChallenge().GetServerHostname() != guardo.hostname {
 		return fmt.Errorf("Invalid server hostname")
+	}
+
+	if cred.GetOp().GetCaller().GetPid() != uint32(callerCred.Pid) {
+		return fmt.Errorf("Invalid caller process id: credential: %d, actual: %d", cred.GetOp().GetCaller().GetPid(), uint32(callerCred.Pid))
+	}
+
+	ppid, err := ga.GetParentProcessId(uint32(callerCred.Pid))
+	if err != nil || cred.GetOp().GetCaller().GetPpid() != ppid {
+		return fmt.Errorf("Invalid caller parent process id: %s", err)
+	}
+
+	cmdline, err := ga.GetProcessCmdline(uint32(callerCred.Pid))
+	if err != nil || cred.GetOp().GetCaller().GetCmdline() != cmdline {
+		return fmt.Errorf("Invalid caller cmdline: credential: %s, actual: %s, %s", cred.GetOp().GetCaller().GetCmdline(), cmdline, err)
 	}
 
 	if !guardo.publicKeys[string(cred.GetChallenge().ServerPublicKeys[0])] {
@@ -206,7 +233,7 @@ func writeElevationResponse(c *net.UnixConn, resp *ga.ElevationResponse, fds []i
 }
 
 func readRequest(c *net.UnixConn, expectedMsgNum ga.MsgNum, pb proto.Message) (fd []int, err error) {
-	const MaxPacketLen = 4096
+	const MaxPacketLen = 20 * 1024
 	packet := make([]byte, MaxPacketLen)
 	oob := make([]byte, unix.CmsgSpace(4))
 
@@ -287,6 +314,8 @@ func (guardo *guardoAgent) handleConnection(c *net.UnixConn) error {
 		return errors.Wrapf(err, "Failed to write challenge response")
 	}
 
+	fmt.Fprintf(os.Stderr, "Generated challenge\n")
+
 	elevReq := &ga.ElevationRequest{}
 	fds := []int{}
 	if fds, err = readRequest(c, ga.MsgNum_ELEVATION_REQUEST, elevReq); err != nil {
@@ -298,7 +327,11 @@ func (guardo *guardoAgent) handleConnection(c *net.UnixConn) error {
 
 	fmt.Fprintf(os.Stderr, "Requested syscall: %d\n", elevReq.GetOp().GetSyscallNum())
 
-	if err := guardo.checkCredential(elevReq, challenge); err != nil {
+	cred, err := ga.GetUcred(c)
+	if err != nil {
+		return fmt.Errorf("Failed to get client credentials: %s", err)
+	}
+	if err := guardo.checkCredential(elevReq, challenge, cred); err != nil {
 		return fmt.Errorf("Credentials error: %s", err)
 	}
 
@@ -306,10 +339,13 @@ func (guardo *guardoAgent) handleConnection(c *net.UnixConn) error {
 
 	handler, err := guardo.getRequestHandler(elevReq.GetOp(), fds)
 	if err != nil {
-		writeElevationResponse(c, &ga.ElevationResponse{ErrnoCode: -1}, []int{})
+		writeElevationResponse(c, &ga.ElevationResponse{ErrnoCode: 1}, []int{})
 		return err
 	}
 	resp, fds := handler()
+	for _, fd := range fds {
+		defer unix.Close(fd)
+	}
 	return writeElevationResponse(c, resp, fds)
 }
 
@@ -321,28 +357,23 @@ func (guardo *guardoAgent) getRequestHandler(op *ga.Operation, fds []int) (func(
 	results := []reflect.Value{}
 	for _, arg := range op.Args {
 		switch arg := arg.Arg.(type) {
-		case *ga.Argument_DirFdArg:
+		case *ga.Argument_FdArg:
 			if fdPos >= len(fds) {
 				return nil, fmt.Errorf("Missing FD. Have only %d but want at least one more", fdPos)
 			}
 			fd := fds[fdPos]
 			fdPos++
-			if err := verifyFileDescriptorPath(fd, arg.DirFdArg.GetPath()); err != nil {
-				return nil, fmt.Errorf("FD does not match path: %d, %s: %s", fd, arg.DirFdArg.GetPath(), err)
+			if err := verifyFileDescriptorPath(fd, arg.FdArg.GetPath()); err != nil {
+				return nil, fmt.Errorf("FD does not match path: %d, %s: %s", fd, arg.FdArg.GetPath(), err)
 			}
-			arg.DirFdArg.Form = &ga.DirFd_Fd{Fd: int32(fd)}
-			argList = append(argList, reflect.ValueOf(arg.DirFdArg))
-		case *ga.Argument_FdArg:
-			if fdPos >= len(fds) {
-				return nil, fmt.Errorf("Missing FD. Have only %d but want at least one more", fdPos)
-			}
-			arg.FdArg.Fd = int32(fds[fdPos])
-			fdPos++
+			arg.FdArg.Form = &ga.Fd_Fd{Fd: int32(fd)}
 			argList = append(argList, reflect.ValueOf(arg.FdArg))
 		case *ga.Argument_IntArg:
 			argList = append(argList, reflect.ValueOf(arg.IntArg))
 		case *ga.Argument_StringArg:
 			argList = append(argList, reflect.ValueOf(arg.StringArg))
+		case *ga.Argument_PathArg:
+			argList = append(argList, reflect.ValueOf(arg.PathArg))
 		case *ga.Argument_BytesArg:
 			argList = append(argList, reflect.ValueOf(arg.BytesArg))
 		case *ga.Argument_OutBufferArg:
@@ -379,10 +410,14 @@ func (guardo *guardoAgent) getRequestHandler(op *ga.Operation, fds []int) (func(
 
 		retvals := reflect.ValueOf(handler).Call(argList)
 		if !retvals[len(retvals)-1].IsNil() {
-			err := retvals[len(retvals)-1].Interface().(syscall.Errno)
-			resp.ErrnoCode = int32(err)
+			err := retvals[len(retvals)-1].Interface().(error)
 			fmt.Fprintf(os.Stderr, "Syscall failed: %s\n", err)
-			return
+			if errno, isOk := err.(syscall.Errno); isOk {
+				resp.ErrnoCode = int32(errno)
+			} else {
+				resp.ErrnoCode = 1
+			}
+			return resp, fds
 		}
 		fmt.Fprintln(os.Stderr, "Syscall succeeded")
 
@@ -391,16 +426,16 @@ func (guardo *guardoAgent) getRequestHandler(op *ga.Operation, fds []int) (func(
 		for _, result := range results {
 			switch result.Type() {
 			case reflect.TypeOf(&ga.Fd{}):
-				resp.Results = append(resp.Results, &ga.Argument{&ga.Argument_FdArg{result.Interface().(*ga.Fd)}})
-				fds = append(fds, int(result.Interface().(*ga.Fd).Fd))
+				resp.Results = append(resp.Results, &ga.Argument{Arg: &ga.Argument_FdArg{result.Interface().(*ga.Fd)}})
+				fds = append(fds, int(result.Interface().(*ga.Fd).GetFd()))
 				break
 			case reflect.TypeOf(int32(0)):
 				fallthrough
 			case reflect.TypeOf(int(0)):
-				resp.Results = append(resp.Results, &ga.Argument{&ga.Argument_IntArg{int32(result.Int())}})
+				resp.Results = append(resp.Results, &ga.Argument{Arg: &ga.Argument_IntArg{int32(result.Int())}})
 				break
 			case reflect.TypeOf([]byte{}):
-				resp.Results = append(resp.Results, &ga.Argument{&ga.Argument_BytesArg{result.Bytes()}})
+				resp.Results = append(resp.Results, &ga.Argument{Arg: &ga.Argument_BytesArg{result.Bytes()}})
 			}
 		}
 
@@ -431,6 +466,9 @@ var handlerRegistry = map[int32]interface{}{
 	syscall.SYS_RENAME:     handleRename,
 	syscall.SYS_SOCKET:     handleSocket,
 	syscall.SYS_BIND:       handleBind,
+	syscall.SYS_CHMOD:      handleChmod,
+	syscall.SYS_FCHMOD:     handleFchmod,
+	syscall.SYS_FCHMODAT:   handleFchmodat,
 }
 
 func main() {
@@ -524,23 +562,25 @@ func main() {
 	}
 
 	for {
-		c, err := s.AcceptUnix()
+		inc, err := s.AcceptUnix()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error accepting connection: %s\n", err)
 			os.Exit(255)
 		}
-		go func() {
-			ucred := ga.GetUcred(c)
-			var err error
+		go func(c *net.UnixConn) {
+			defer c.Close()
+			ucred, connerr := ga.GetUcred(c)
+			if connerr != nil {
+				fmt.Fprintf(os.Stderr, "\n>>> Got connection with bad credentials: %s\n", connerr)
+				return
+			}
 			fmt.Fprintf(os.Stderr, "\n>>> Got connection from uid: %d, pid: %d\n", ucred.Uid, ucred.Pid)
-			err = guardo.handleConnection(c)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "<<< Connection finished with error: %s\n", err)
+			connerr = guardo.handleConnection(c)
+			if connerr != nil {
+				fmt.Fprintf(os.Stderr, "<<< Connection finished with error: %s\n", connerr)
 			} else {
 				fmt.Fprintf(os.Stderr, "<<< Connection finished OK\n")
 			}
-
-			c.Close()
-		}()
+		}(inc)
 	}
 }

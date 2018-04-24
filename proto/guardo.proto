@@ -4,31 +4,27 @@ package guardian_agent;
 
 option go_package = "guardianagent";
 
-message DirFd {
+message Fd {
     oneof form {
         int32 fd = 1;
         string path = 2;
     }
 }
 
-message Fd {
-    int32 fd = 1;
-}
-
 message OutBuffer {
     int32 len = 1;
 }
-
 
 message Argument {
     oneof arg {
         int32 int_arg = 1;
         string string_arg = 2;
-        DirFd dir_fd_arg = 3;
         Fd fd_arg = 4;
         bytes bytes_arg = 5;
         OutBuffer out_buffer_arg = 6;
+        string path_arg = 7;
     }
+    bool hidden = 100;
 }
 
 message Process {
@@ -49,10 +45,10 @@ message Param {
         UNKNOWN = 0;
         INT32 = 1;
         STRING = 2;
-        DIR_FD = 3;
         FD = 4;
         IN_BUFFER = 5;
         OUT_BUFFER = 6;
+        PATH = 7;
     }
     
     ParamType type = 1;
@@ -68,7 +64,6 @@ message SyscallSpec {
     string name = 2;
     Param.ParamType retval = 3;
     repeated Param params = 4;
-    bool add_fd_cwd = 5;
 }
 
 message Syscalls {

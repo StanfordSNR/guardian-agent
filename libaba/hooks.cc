@@ -33,12 +33,12 @@ static const char* GUARDO_SOCK_NAME = ".guardo-sock";
 std::unique_ptr<FileDescriptor> marshal_fds(Operation* op, std::vector<int>* fds) {
     std::unique_ptr<FileDescriptor> fd_cwd;
     for (auto& arg : *op->mutable_args()) {
-        if (arg.has_dir_fd_arg()) {
-            DirFd* dir_fd = arg.mutable_dir_fd_arg();
-            if (dir_fd->form_case() != DirFd::kFd) {
+        if (arg.has_fd_arg()) {
+            Fd* fd = arg.mutable_fd_arg();
+            if (fd->form_case() != Fd::kFd) {
                 continue;
             }
-            if (dir_fd->fd() == AT_FDCWD) {
+            if (fd->fd() == AT_FDCWD) {
                 if (!fd_cwd) {
                     fd_cwd = std::make_unique<FileDescriptor>(openat(AT_FDCWD, ".", O_RDONLY, 0));
                     if (fd_cwd->fd_num() < 0) {
@@ -46,14 +46,11 @@ std::unique_ptr<FileDescriptor> marshal_fds(Operation* op, std::vector<int>* fds
                     }
                 }
                 fds->push_back(fd_cwd->fd_num());
-                dir_fd->set_path(fs::current_path());
+                fd->set_path(fs::current_path());
             } else {
-                fds->push_back(dir_fd->fd());
-                dir_fd->set_path(fs::read_symlink(fs::path("/proc/self/fd") / std::to_string(dir_fd->fd())));
+                fds->push_back(fd->fd());
+                fd->set_path(fs::read_symlink(fs::path("/proc/self/fd") / std::to_string(fd->fd())));
             }
-        } else if (arg.has_fd_arg()) {
-            Fd* fd = arg.mutable_fd_arg();
-            fds->push_back(fd->fd());
         }   
     }
 
@@ -112,6 +109,10 @@ bool read_expected_msg(FileDescriptor* fd, const unsigned char expected_msg_num,
 bool read_expected_msg_with_fd(UnixSocket* socket, const unsigned char expected_msg_num, google::protobuf::MessageLite* msg, std::vector<int>* fds) 
 {
     std::string packet = socket->recvmsg(fds);
+    if (packet.size() < sizeof(int)) {
+        std::cerr << "Error: got empty packet" << std::endl;
+        return false;
+    }
     int payload_size = ntohl(*(int*)packet.data());
     if (packet.size() != (sizeof(int) + payload_size)) {
         std::cerr << "Error: enexpected packet size: " << packet.size()  
@@ -164,13 +165,13 @@ bool get_myself(Process* myself)
 	}
  
 	std::string cmdline;
-    while (!in.eof())
-	{
-        std::string arg;
-        std::getline(in, arg, '\0');
-        cmdline += " " + arg;
+    for (std::string arg; std::getline(in, arg, '\0');)
+	{       
+        cmdline += (arg + " ");
 	}
 	in.close();
+
+    cmdline = cmdline.substr(0, cmdline.size()-1);
 
     myself->set_pid(getpid());
     myself->set_cmdline(cmdline);
@@ -315,10 +316,8 @@ init(void)
     guardian_agent::Syscalls syscalls;
     if (!syscalls.ParseFromString(std::string(&_binary_syscalls_binproto_start, &_binary_syscalls_binproto_end - &_binary_syscalls_binproto_start))) {
         std::cerr << "Failed to parse syscalls proto" << std::endl;
-    } else {
-        std::cerr << "Parsed " << syscalls.syscall_size() << " syscalls from proto" << std::endl;
-    }
-
+    } 
+ 
     for (const auto& spec : syscalls.syscall()) {
         guardian_agent::SyscallMarshallRegistry::Register(spec);
     }

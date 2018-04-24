@@ -226,6 +226,28 @@ func RenameNoFollow(oldDirFd int, oldPath string, newDirFd int, newPath string, 
 	return nil
 }
 
+func ChmodNoFollow(dirFD int, path string, mode uint32, flags int) error {
+	base, last := split(path)
+	dirFD, err := OpenDirNoFollow(dirFD, base)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(dirFD)
+
+	stats := unix.Stat_t{}
+	err = unix.Fstatat(dirFD, last, &stats, unix.AT_SYMLINK_NOFOLLOW)
+	if err != nil {
+		return err
+	}
+	// If user did not specify O_NOFOLLOW, but the path points to a symbolic link
+	// we force-fail the syscall.
+	if flags&unix.AT_SYMLINK_NOFOLLOW != 0 && stats.Mode&syscall.S_IFMT == syscall.S_IFLNK {
+		return syscall.ELOOP
+	}
+
+	return unix.Fchmodat(dirFD, last, mode, flags&unix.AT_SYMLINK_NOFOLLOW)
+}
+
 func OpenDirNoFollow(dirFD int, path string) (int, error) {
 	parts := strings.Split(path, "/")
 	if filepath.IsAbs(path) {
@@ -245,8 +267,8 @@ func OpenDirNoFollow(dirFD int, path string) (int, error) {
 		childFD, err := unix.Openat(dirFD, part, unix.O_NOFOLLOW|unix.O_DIRECTORY|unix.O_PATH, 0)
 		if !first {
 			unix.Close(dirFD)
-			first = false
 		}
+		first = false
 		if err != nil {
 			return -1, errors.Wrapf(err, "Failed to openat base dir component: %s", part)
 		}

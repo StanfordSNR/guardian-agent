@@ -54,11 +54,42 @@ type options struct {
 	SSHCommand SSHCommand `positional-args:"true"`
 
 	Foreground bool `short:"f"`
+
+	Yubikey bool `short:"y"`
 }
 
 type incomingListener interface {
 	Accept() (net.Conn, error)
 	Close() error
+}
+
+func runProtectedSSHAgent(conf Config) error {
+	tempDir, err := ioutil.TempDir(guardianagent.UserTempDir(), "ssh-agent")
+	if err != nil {
+		return fmt.Errorf("Failed to create tempdir ssh-agent: %s", err)
+	}
+	agentSockPath := path.Join(tempDir, "ssh-agent-sock")
+	realAgent := exec.Command(conf.SSHAgent, "-a", agentSockPath)
+	realAgent.SysProcAttr = &syscall.SysProcAttr{}
+	realAgent.SysProcAttr.Credential = &syscall.Credential{Uid: uint32(os.Geteuid()), Gid: uint32(os.Getegid())}
+	realAgent.Env = []string{}
+	output, err := realAgent.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("Failed to run ssh-agent: %s, %s", err, output)
+	}
+	os.Setenv("SSH_AUTH_SOCK", agentSockPath)
+	sshAdd := exec.Command(conf.SSHAdd, "-s", conf.PKCS11Lib)
+	sshAdd.SysProcAttr = &syscall.SysProcAttr{}
+	sshAdd.SysProcAttr.Credential = &syscall.Credential{Uid: uint32(os.Geteuid()), Gid: uint32(os.Getegid())}
+	sshAdd.Env = []string{fmt.Sprintf("SSH_AUTH_SOCK=%s", agentSockPath)}
+	sshAdd.Stdin = os.Stdin
+	sshAdd.Stdout = os.Stdout
+	sshAdd.Stderr = os.Stderr
+	err = sshAdd.Run()
+	if err != nil {
+		return fmt.Errorf("Failed to run ssh-add: %s", err)
+	}
+	return nil
 }
 
 func main() {
@@ -144,6 +175,10 @@ func main() {
 		os.Exit(255)
 	}
 
+	if opts.Yubikey {
+		runProtectedSSHAgent(conf)
+	}
+
 	var listener incomingListener
 	if opts.SSHCommand.UserHost != "" {
 		sshFwd := guardianagent.NewSSHFwd(opts.SSHProgram, sshOptions, opts.SSHCommand.UserHost, opts.RemoteStubName)
@@ -157,39 +192,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Forwarding to %s setup successfully. Waiting for incoming requests...\n", sshFwd.RemoteReadableName)
 		listener = sshFwd
 	} else {
-		euid := syscall.Geteuid()
-		ruid := syscall.Getuid()
-		syscall.Setreuid(euid, euid)
-
-		tempDir, err := ioutil.TempDir(guardianagent.UserTempDir(), "ssh-agent")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to create tempdir ssh-agent: %s", err)
-			os.Exit(255)
-		}
-		agentSockPath := path.Join(tempDir, "ssh-agent-sock")
-		realAgent := exec.Command(conf.SSHAgent, "-a", agentSockPath)
-		realAgent.Env = []string{}
-		output, err := realAgent.CombinedOutput()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to run ssh-agent: %s, %s", err, output)
-			os.Exit(255)
-		}
-		os.Setenv("SSH_AUTH_SOCK", agentSockPath)
-
-		sshAdd := exec.Command(conf.SSHAdd, "-s", conf.PKCS11Lib)
-		sshAdd.Env = []string{fmt.Sprintf("SSH_AUTH_SOCK=%s", agentSockPath)}
-		sshAdd.Stdin = os.Stdin
-		sshAdd.Stdout = os.Stdout
-		sshAdd.Stderr = os.Stderr
-		err = sshAdd.Run()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to run ssh-add: %s", err)
-			os.Exit(255)
-		}
-
-		syscall.Setreuid(ruid, euid)
-		log.Printf("uid: %d, euid: %d\n", syscall.Getuid(), syscall.Geteuid())
-
 		rawListener, bindAddr, err := guardianagent.CreateSocket("")
 		os.Chown(bindAddr, os.Getuid(), os.Getegid())
 		listener = guardianagent.UDSListener{rawListener}
@@ -230,10 +232,8 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error forwarding: %s\n", err)
 			os.Exit(255)
 		}
-		go func() {
-			if err = ag.HandleConnection(c); err != nil {
-				fmt.Fprintf(os.Stderr, "Error forwarding: %s\n", err)
-			}
-		}()
+		if err = ag.HandleConnection(c); err != nil {
+			fmt.Fprintf(os.Stderr, "Error forwarding: %s\n", err)
+		}
 	}
 }

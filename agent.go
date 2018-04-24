@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"os"
 	"strconv"
@@ -110,7 +109,7 @@ func (agent *Agent) HandleConnection(conn net.Conn) error {
 		if err != nil {
 			return fmt.Errorf("Failed to read control packet: %s", err)
 		}
-		log.Printf("Got msgNum: %d", msgNum)
+
 		switch msgNum {
 		case MsgNum_AGENT_FORWARDING_NOTICE:
 			notice := new(AgentForwardingNoticeMsg)
@@ -221,15 +220,6 @@ func (agent *Agent) handleCredentialRequest(conn net.Conn, scope Scope, req *Cre
 	if err != nil {
 		writeCredentialResponse(conn, &CredentialResponse{Status: CredentialResponse_DENIED})
 		return fmt.Errorf("request BLOCKED due to invalid challenge: %s", err)
-	}
-	switch agent.policy.UI.(type) {
-	case *ConsoleUI:
-		originalTTY, err := FocusVT(NewVt)
-		if err != nil {
-			log.Printf("Failed to get focus: %s\n", err)
-		}
-		defer FocusVT(originalTTY)
-		break
 	}
 
 	err = agent.policy.RequestCredentialApproval(scope, req)

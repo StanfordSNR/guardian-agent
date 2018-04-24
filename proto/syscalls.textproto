@@ -2,10 +2,9 @@ syscall {
     name: "open"
     num: 2
     retval: FD
-    add_fd_cwd : true
     params {
         name: "filename"
-        type: STRING
+        type: PATH
     }
     params { 
         name: "flags"
@@ -23,11 +22,11 @@ syscall {
     retval: FD
     params {
         name: "dir_fd"
-        type: DIR_FD
+        type: FD
     }
     params {
         name: "filename"
-        type: STRING
+        type: PATH
     }
     params {
         name: "flags"
@@ -42,10 +41,9 @@ syscall {
 syscall {
     name: "mkdir"
     num: 83
-    add_fd_cwd: true
     params {
         name: "pathname"
-        type: STRING
+        type: PATH
     }
     params {
         name: "flags"
@@ -58,11 +56,11 @@ syscall {
     num: 258
     params {
         name: "dir_fd"
-        type: DIR_FD
+        type: FD
     }
     params {
         name: "pathname"
-        type: STRING
+        type: PATH
     }
     params {
         name: "flags"
@@ -73,14 +71,13 @@ syscall {
 syscall {
     name: "symlink"
     num: 88
-    add_fd_cwd: true
     params {
         name: "oldname"
-        type: STRING
+        type: PATH
     }
     params {
         name: "newname"
-        type: STRING
+        type: PATH
     }
 }
 
@@ -89,25 +86,24 @@ syscall {
     num: 266
     params {
         name: "oldname"
-        type: STRING
+        type: PATH
     }
     params {
         name: "newfd"
-        type: DIR_FD
+        type: FD
     }
     params {
         name: "newname"
-        type: STRING
+        type: PATH
     }
 }
 
 syscall {
     name: "unlink"
     num: 87
-    add_fd_cwd: true
     params {
         name: "pathname"
-        type: STRING
+        type: PATH
     }
 }
 
@@ -116,11 +112,11 @@ syscall {
     num: 263
     params {
         name: "dir_fd"
-        type: DIR_FD
+        type: FD
     }
     params {
         name: "pathname"
-        type: STRING
+        type: PATH
     }
     params {
         name: "flags"
@@ -131,10 +127,9 @@ syscall {
 syscall {
     name: "rmdir"
     num: 84
-    add_fd_cwd: true
     params {
         name: "pathname"
-        type: STRING       
+        type: PATH       
     }
 }
 
@@ -143,11 +138,11 @@ syscall {
     num: 269
     params {
         name: "dir_fd"
-        type: DIR_FD
+        type: FD
     }
     params {
         name: "filename"
-        type: STRING
+        type: PATH
     }
     params {
         name: "mode"
@@ -158,10 +153,9 @@ syscall {
 syscall {
     name: "access"
     num: 21
-    add_fd_cwd: true
     params {
         name: "filename"
-        type: STRING
+        type: PATH
     }
     params {
         name: "mode"
@@ -174,11 +168,11 @@ syscall {
     num: 262
     params {
         name: "dir_fd"
-        type: DIR_FD
+        type: FD
     }
     params {
         name: "filename"
-        type: STRING
+        type: PATH
     }
     params {
         name: "statbuf"
@@ -194,10 +188,9 @@ syscall {
 syscall {
     name: "stat"
     num: 4
-    add_fd_cwd: true
     params {
         name: "filename"
-        type: STRING
+        type: PATH
     }
     params {
         name: "statbuf"
@@ -209,10 +202,9 @@ syscall {
 syscall {
     name: "lstat"
     num: 6
-    add_fd_cwd: true
     params {
         name: "filename"
-        type: STRING
+        type: PATH
     }
     params {
         name: "statbuf"
@@ -241,11 +233,11 @@ syscall {
     retval: INT32
     params {
         name: "dir_fd"
-        type: DIR_FD
+        type: FD
     }
     params {
         name: "pathname"
-        type: STRING
+        type: PATH
     }
     params {
         name: "buf"
@@ -262,10 +254,9 @@ syscall {
     name: "readlink"
     num: 89
     retval: INT32
-    add_fd_cwd: true
     params {
         name: "pathname"
-        type: STRING
+        type: PATH
     }
     params {
         name: "buf"
@@ -283,19 +274,19 @@ syscall {
     num: 316
     params {
         name: "olddfd"
-        type: DIR_FD
+        type: FD
     }
     params {
         name: "oldname"
-        type: STRING
+        type: PATH
     }
     params {
         name: "newdfd"
-        type: DIR_FD
+        type: FD
     }
     params {
         name: "newname"
-        type: STRING
+        type: PATH
     }
     params {
         name: "flags"
@@ -308,33 +299,79 @@ syscall {
     num: 264
     params {
         name: "olddfd"
-        type: DIR_FD
+        type: FD
     }
     params {
         name: "oldname"
-        type: STRING
+        type: PATH
     }
     params {
         name: "newdfd"
-        type: DIR_FD
+        type: FD
     }
     params {
         name: "newname"
-        type: STRING
+        type: PATH
     }
 }
 
 syscall {
     name: "rename"
     num: 82
-    add_fd_cwd: true
     params {
         name: "oldname"
-        type: STRING
+        type: PATH
     }
     params {
         name: "newname"
-        type: STRING
+        type: PATH
+    }
+}
+
+syscall {
+    name: "chmod"
+    num: 90
+    params {
+        name: "pathname"
+        type: PATH
+    }
+    params {
+        name: "mode"
+        type: INT32
+    }
+}
+
+syscall {
+    name: "fchmod"
+    num: 91
+    params {
+        name: "fd"
+        type: FD
+    }
+    params {
+        name: "mode"
+        type: INT32
+    }
+}
+
+syscall {
+    name: "fchmodat"
+    num: 268
+    params {
+        name: "dirfd"
+        type: FD
+    }
+    params {
+        name: "pathname"
+        type: PATH
+    }
+    params {
+        name: "mode"
+        type: INT32
+    }
+    params {
+        name: "flags"
+        type: INT32
     }
 }
 

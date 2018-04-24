@@ -3,12 +3,13 @@ package guardianagent
 import (
 	"encoding/hex"
 	"fmt"
+	"path"
+	"strings"
 )
 
 type SyscallInfo struct {
 	Desc      string
 	Name      string
-	DirFds    []string
 	FilePaths []string
 }
 
@@ -32,40 +33,46 @@ func NewSyscallInfo(op *Operation) *SyscallInfo {
 	}
 	cwdSuffix := ""
 	args := op.GetArgs()
-	if spec.GetAddFdCwd() {
-		dirPath := args[0].GetDirFdArg().GetPath()
-		cwdSuffix = fmt.Sprintf("\nrelative to dir: %s", dirPath)
-		info.DirFds = append(info.DirFds, dirPath)
-		args = args[1:]
-	}
+	currentDirPath := ""
+	argDescs := []string{}
 	for i, arg := range args {
-		if i < len(spec.GetParams()) {
-			info.Desc += spec.GetParams()[i].GetName() + ": "
-		}
 		switch arg := arg.Arg.(type) {
 		case *Argument_IntArg:
-			info.Desc += fmt.Sprintf("%d", arg.IntArg)
+			argDescs = append(argDescs, fmt.Sprintf("%d", arg.IntArg))
 		case *Argument_StringArg:
-			info.Desc += fmt.Sprintf("\"%s\"", arg.StringArg)
-			info.FilePaths = append(info.FilePaths, arg.StringArg)
+			argDescs = append(argDescs, fmt.Sprintf("\"%s\"", arg.StringArg))
 		case *Argument_BytesArg:
 			bufPreview := hex.EncodeToString(arg.BytesArg)
 			if len(arg.BytesArg) > 20 {
 				bufPreview = hex.EncodeToString(arg.BytesArg[0:20]) + "..."
 			}
-			info.Desc += fmt.Sprintf("buffer of length %d [%s]", len(arg.BytesArg), bufPreview)
+			argDescs = append(argDescs, fmt.Sprintf("buffer of length %d [%s]", len(arg.BytesArg), bufPreview))
 		case *Argument_OutBufferArg:
-			info.Desc += fmt.Sprintf("buffer of length %d", arg.OutBufferArg.GetLen())
+			continue
 		case *Argument_FdArg:
-			info.Desc += fmt.Sprintf("fd #%d", arg.FdArg.GetFd())
-		case *Argument_DirFdArg:
-			info.Desc += fmt.Sprintf("[%s]", arg.DirFdArg.GetPath())
-			info.DirFds = append(info.DirFds, arg.DirFdArg.GetPath())
-		}
-		if i < len(args)-1 {
-			info.Desc += ", "
+			currentDirPath = arg.FdArg.GetPath()
+			if currentDirPath == "" {
+				argDescs = append(argDescs, fmt.Sprintf("fd #%d", arg.FdArg.GetFd()))
+			} else {
+				argDescs = append(argDescs, currentDirPath)
+			}
+			info.FilePaths = append(info.FilePaths, currentDirPath)
+			continue
+		case *Argument_PathArg:
+			filePath := arg.PathArg
+			if !path.IsAbs(filePath) {
+				filePath = path.Join(currentDirPath, filePath)
+			}
+			if i > 0 {
+				if _, prevIsFd := args[i-1].Arg.(*Argument_FdArg); prevIsFd {
+					argDescs = argDescs[:len(argDescs)-1]
+					info.FilePaths = info.FilePaths[:len(info.FilePaths)-1]
+				}
+			}
+			argDescs = append(argDescs, fmt.Sprintf(filePath))
+			info.FilePaths = append(info.FilePaths, filePath)
 		}
 	}
-	info.Desc += ")" + cwdSuffix
+	info.Desc += strings.Join(argDescs, ", ") + ")" + cwdSuffix
 	return &info
 }

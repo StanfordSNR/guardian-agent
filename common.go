@@ -422,16 +422,46 @@ func ResolveHostParams(sshProgram string, sshArgs []string) (host string, port u
 	return
 }
 
-func GetUcred(conn *net.UnixConn) *syscall.Ucred {
-	f, err := conn.File()
+func GetUcred(conn *net.UnixConn) (*syscall.Ucred, error) {
+	var cred *syscall.Ucred
+	rawConn, err := conn.SyscallConn()
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("Failed to get Ucred for fd: %d, failed to get RawConn: %s", err)
 	}
-	defer f.Close()
+	err2 := rawConn.Control(
+		func(fd uintptr) {
+			cred, err = syscall.GetsockoptUcred(int(fd), syscall.SOL_SOCKET, syscall.SO_PEERCRED)
+		})
+	if err2 != nil {
+		return nil, fmt.Errorf("Failed to get Ucred: %s", err2)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get Ucred: %s", err)
+	}
+	return cred, nil
+}
 
-	cred, err := syscall.GetsockoptUcred(int(f.Fd()), syscall.SOL_SOCKET, syscall.SO_PEERCRED)
+func GetParentProcessId(pid uint32) (uint32, error) {
+	stat, err := ioutil.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
-		return nil
+		return 0, fmt.Errorf("Failed to read proc for process: %s", err)
 	}
-	return cred
+	lines := strings.Split(string(stat), " ")
+	if len(lines) < 4 {
+		return 0, fmt.Errorf("Invalid proc for process, expected 4 lines at least: %v", lines)
+	}
+	ppid, err := strconv.Atoi(lines[3])
+	if err != nil {
+		return 0, fmt.Errorf("Failed to parse ppid: %s, %s", lines[3], err)
+	}
+	return uint32(ppid), nil
+}
+
+func GetProcessCmdline(pid uint32) (string, error) {
+	stat, err := ioutil.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+	if err != nil {
+		return "", fmt.Errorf("Failed to read proc for process: %s", err)
+	}
+	args := strings.Split(string(stat), "\000")
+	return strings.Join(args[:len(args)-1], " "), nil
 }

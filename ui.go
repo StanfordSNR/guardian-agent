@@ -58,9 +58,6 @@ func mapToChoice(vs []string) []i.Choice {
 }
 
 func (tui *FancyTerminalUI) Ask(params Prompt) (reply int, err error) {
-	tui.mu.Lock()
-	defer tui.mu.Unlock()
-
 	var resp int64
 
 	i.Run(&i.Interact{
@@ -84,23 +81,14 @@ func (tui *FancyTerminalUI) Ask(params Prompt) (reply int, err error) {
 }
 
 func (tui *FancyTerminalUI) Inform(msg string) {
-	tui.mu.Lock()
-	defer tui.mu.Unlock()
-
 	fmt.Fprintln(os.Stderr, msg)
 }
 
 func (tui *FancyTerminalUI) Alert(msg string) {
-	tui.mu.Lock()
-	defer tui.mu.Unlock()
-
 	fmt.Fprintln(os.Stderr, msg)
 }
 
 func (tui *FancyTerminalUI) AskPassword(msg string) (string, error) {
-	tui.mu.Lock()
-	defer tui.mu.Unlock()
-
 	fmt.Fprintln(os.Stderr, msg)
 	passBytes, err := gopass.GetPasswd()
 	if err == nil {

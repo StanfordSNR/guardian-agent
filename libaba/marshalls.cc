@@ -74,10 +74,7 @@ public:
             default:
                 std::cerr << "Unexpected retval type: " << spec.retval() << std::endl;
         }
-        if (spec.add_fd_cwd()) {
-            args.Add()->mutable_dir_fd_arg()->set_fd(AT_FDCWD);            
-        }
-
+        bool add_fd_cwd = false;
         for (int i = 0; i < spec.params_size(); ++i) {
             const auto& param = spec.params(i);
             switch (param.type()) {
@@ -87,11 +84,14 @@ public:
                 case Param::STRING:
                     args.Add()->set_string_arg((const char*)raw_args[i]);
                     break;
+                case Param::PATH:
+                    if ((i == 0) || (spec.params(i-1).type() != Param::FD))  {
+                        add_fd_cwd = true;
+                    }
+                    args.Add()->set_path_arg((const char*)raw_args[i]);
+                    break;
                 case Param::FD:
                     args.Add()->mutable_fd_arg()->set_fd(raw_args[i]);
-                    break;
-                case Param::DIR_FD:
-                    args.Add()->mutable_dir_fd_arg()->set_fd(raw_args[i]);
                     break;
                 case Param::IN_BUFFER: {
                     size_t len = param.const_len();
@@ -121,6 +121,14 @@ public:
                     std::cerr << "Unknown param type: %d" << param.type() << std::endl;
             }
         }
+        if (add_fd_cwd) {
+            args.Add()->mutable_fd_arg()->set_fd(AT_FDCWD);            
+            for (int i = args.size() - 1; i > 0; --i) {
+                args.SwapElements(i, i-1);
+            }
+            args.Mutable(0)->set_hidden(true);
+        }
+
     }
 
 private:
@@ -154,7 +162,6 @@ class Registrar
 public:
     Registrar(int syscall_number) 
     { 
-        std::cerr << "Register " <<  "(" << syscall_number << ")" << std::endl;
         SyscallMarshallRegistry::Register(syscall_number, [](long raw_args[6]){ return new T(raw_args); });
     }
 };
@@ -171,7 +178,6 @@ void SyscallMarshallRegistry::Register(long syscall_number, FactoryFunc factory_
 
 void SyscallMarshallRegistry::Register(const SyscallSpec& spec)
 {
-    std::cerr << "Register " << spec.name() << "(" << spec.num() << ")" << std::endl;
     Register(spec.num(), [spec](long raw_args[6]){ return new DynamicMarshall(spec, raw_args); });
 }
 
