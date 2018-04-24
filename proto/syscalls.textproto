@@ -376,6 +376,72 @@ syscall {
 }
 
 syscall {
+    name: "lchown"
+    num: 94
+    params {
+         name: "pathname"
+         type: PATH
+    }
+    params {
+        name: "owner" 
+        type: INT32
+    }
+    params {
+        name: "group"
+        type: INT32
+    }
+}
+
+syscall {
+    name: "utimensat"
+    num: 280
+    params {
+        name: "dirfd"
+        type: FD
+    }
+    params {
+        name: "pathname"
+        type: PATH
+    }
+    params {
+        name: "times"
+        type: IN_BUFFER
+        const_len: 32
+    }
+    params {
+        name: "flags"
+        type: INT32
+    }
+}
+
+syscall {
+    name: "utimes"
+    num: 235
+    params {
+        name: "filename"
+        type: PATH
+    }
+    params {
+        name: "times"
+        type: IN_BUFFER
+        const_len: 32
+    }
+}
+
+syscall {
+    name: "link"
+    num: 86
+    params {
+        name: "oldname"
+        type: PATH
+    }
+    params {
+        name: "newname"
+        type: PATH
+    }
+}
+
+syscall {
     name: "socket"
     num: 41
     retval: FD

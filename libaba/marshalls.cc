@@ -88,7 +88,11 @@ public:
                     if ((i == 0) || (spec.params(i-1).type() != Param::FD))  {
                         add_fd_cwd = true;
                     }
-                    args.Add()->set_path_arg((const char*)raw_args[i]);
+                    if (raw_args[i] != 0) {
+                        args.Add()->set_path_arg((const char*)raw_args[i]);
+                    } else {
+                        args.Add()->set_path_arg("");
+                    }
                     break;
                 case Param::FD:
                     args.Add()->mutable_fd_arg()->set_fd(raw_args[i]);

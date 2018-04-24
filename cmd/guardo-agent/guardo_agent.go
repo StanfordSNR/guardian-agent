@@ -88,6 +88,24 @@ func handleSymlink(dirFd *ga.Fd, target string, path string) error {
 	return handleSymlinkAt(target, dirFd, path)
 }
 
+func handleLink(dirFd *ga.Fd, oldPath string, newPath string) error {
+	oldpathp, err := syscall.BytePtrFromString(oldPath)
+	if err != nil {
+		return err
+	}
+	newpathp, err := syscall.BytePtrFromString(newPath)
+	if err != nil {
+		return err
+	}
+	_, _, errno := syscall.Syscall6(syscall.SYS_LINKAT, uintptr(dirFd.GetFd()), uintptr(unsafe.Pointer(oldpathp)), uintptr(dirFd.GetFd()), uintptr(unsafe.Pointer(newpathp)), 0, 0)
+	if errno != 0 {
+		err = errno
+		return err
+	}
+	return nil
+
+}
+
 func handleUnlinkAt(dirFd *ga.Fd, path string, flags int32) error {
 	return ga.UnlinkNoFollow(int(dirFd.GetFd()), path, int(flags))
 }
@@ -146,6 +164,42 @@ func handleChmod(dirFd *ga.Fd, path string, mode int32) error {
 
 func handleFchmod(fd *ga.Fd, mode int32) error {
 	return unix.Fchmod(int(fd.GetFd()), uint32(mode))
+}
+
+func handleLchown(dirFd *ga.Fd, path string, owner int32, group int32) error {
+	return syscall.Fchownat(int(dirFd.GetFd()), path, int(owner), int(group), unix.AT_SYMLINK_NOFOLLOW)
+}
+
+func handleUtimensat(dirFd *ga.Fd, pathname string, times []byte, flags int32) error {
+	pathp, err := syscall.BytePtrFromString(pathname)
+	if err != nil {
+		return err
+	}
+	if pathname == "" {
+		pathp = nil
+	}
+	_, _, errno := syscall.Syscall6(syscall.SYS_UTIMENSAT, uintptr(dirFd.GetFd()), uintptr(unsafe.Pointer(pathp)), uintptr(unsafe.Pointer(&times[0])), uintptr(flags), 0, 0)
+	if errno != 0 {
+		err = errno
+		return err
+	}
+	return nil
+}
+
+func handleUtimes(dirFd *ga.Fd, pathname string, times []byte) error {
+	pathp, err := syscall.BytePtrFromString(pathname)
+	if err != nil {
+		return err
+	}
+	if pathname == "" {
+		pathp = nil
+	}
+	_, _, errno := syscall.Syscall(syscall.SYS_FUTIMESAT, uintptr(dirFd.GetFd()), uintptr(unsafe.Pointer(pathp)), uintptr(unsafe.Pointer(&times[0])))
+	if errno != 0 {
+		err = errno
+		return err
+	}
+	return nil
 }
 
 func handleSocket(domain int32, typeArg int32, protocol int32) (*ga.Fd, error) {
@@ -452,6 +506,7 @@ var handlerRegistry = map[int32]interface{}{
 	syscall.SYS_SYMLINKAT:  handleSymlinkAt,
 	syscall.SYS_UNLINK:     handleUnlink,
 	syscall.SYS_UNLINKAT:   handleUnlinkAt,
+	syscall.SYS_LINK:       handleLink,
 	syscall.SYS_RMDIR:      handleRmdir,
 	syscall.SYS_ACCESS:     handleAccess,
 	syscall.SYS_FACCESSAT:  handleAccess,
@@ -469,6 +524,9 @@ var handlerRegistry = map[int32]interface{}{
 	syscall.SYS_CHMOD:      handleChmod,
 	syscall.SYS_FCHMOD:     handleFchmod,
 	syscall.SYS_FCHMODAT:   handleFchmodat,
+	syscall.SYS_LCHOWN:     handleLchown,
+	syscall.SYS_UTIMES:     handleUtimes,
+	syscall.SYS_UTIMENSAT:  handleUtimensat,
 }
 
 func main() {
