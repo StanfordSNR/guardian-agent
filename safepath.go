@@ -63,6 +63,42 @@ func UnlinkNoFollow(dirFD int, path string, flags int) error {
 	return unix.Unlinkat(dirFD, last, flags)
 }
 
+func LinkNoFollow(oldDirFd int, oldPath string, newDirFd int, newPath string, flags int) error {
+	var err error
+	if oldPath != "" {
+		openFlags := unix.O_PATH
+		if flags&unix.AT_SYMLINK_FOLLOW == 0 {
+			openFlags |= unix.O_NOFOLLOW
+		}
+		oldDirFd, err = OpenNoFollow(oldDirFd, oldPath, openFlags, 0)
+		if err != nil {
+			return err
+		}
+		defer unix.Close(oldDirFd)
+	}
+	base, last := split(newPath)
+	dirFD, err := OpenDirNoFollow(newDirFd, base)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(dirFD)
+	newpathp, err := syscall.BytePtrFromString(last)
+	if err != nil {
+		return err
+	}
+	oldpathp, err := syscall.BytePtrFromString("")
+	if err != nil {
+		return err
+	}
+	_, _, errno := syscall.Syscall6(syscall.SYS_LINKAT, uintptr(oldDirFd), uintptr(unsafe.Pointer(oldpathp)), uintptr(dirFD), uintptr(unsafe.Pointer(newpathp)), unix.AT_EMPTY_PATH, 0)
+	if errno != 0 {
+		err = errno
+		return err
+	}
+	return nil
+
+}
+
 func MkdirNoFollow(dirFD int, path string, mode uint32) error {
 	base, last := split(path)
 	dirFD, err := OpenDirNoFollow(dirFD, base)
@@ -246,6 +282,69 @@ func ChmodNoFollow(dirFD int, path string, mode uint32, flags int) error {
 	}
 
 	return unix.Fchmodat(dirFD, last, mode, flags&unix.AT_SYMLINK_NOFOLLOW)
+}
+
+func ChownNoFollow(dirFd int, path string, owner int, group int, flags int) error {
+	if path != "" {
+		openFlags := unix.O_PATH
+		if flags&unix.AT_SYMLINK_NOFOLLOW != 0 {
+			openFlags |= unix.O_NOFOLLOW
+		}
+		var err error
+		dirFd, err = OpenNoFollow(dirFd, path, openFlags, 0)
+		if err != nil {
+			return err
+		}
+		defer unix.Close(dirFd)
+	}
+	return unix.Fchownat(dirFd, "", owner, group, flags|unix.AT_EMPTY_PATH)
+}
+
+func UtimensatNoFollow(dirFd int, path string, times []byte, flags int32) error {
+	var err error
+	if path != "" {
+		openFlags := 0
+		if flags&unix.AT_SYMLINK_NOFOLLOW != 0 {
+			openFlags |= unix.O_NOFOLLOW
+		}
+		dirFd, err = OpenNoFollow(dirFd, path, openFlags, 0)
+		if err != nil {
+			return err
+		}
+		defer unix.Close(dirFd)
+	}
+	timesPtr := uintptr(0)
+	if times != nil && len(times) > 0 {
+		timesPtr = uintptr(unsafe.Pointer(&times[0]))
+	}
+	_, _, errno := syscall.Syscall6(syscall.SYS_UTIMENSAT, uintptr(dirFd), uintptr(0), timesPtr, uintptr(flags), 0, 0)
+	if errno != 0 {
+		err = errno
+		return err
+	}
+	return nil
+}
+
+func Utimes(dirFd int, path string, times []byte) error {
+	var err error
+	if path != "" {
+		dirFd, err = OpenNoFollow(dirFd, path, 0, 0)
+		if err != nil {
+			return err
+		}
+		defer unix.Close(dirFd)
+	}
+	timesPtr := uintptr(0)
+	if times != nil && len(times) > 0 {
+		timesPtr = uintptr(unsafe.Pointer(&times[0]))
+	}
+	_, _, errno := syscall.Syscall(syscall.SYS_FUTIMESAT, uintptr(dirFd), uintptr(0), timesPtr)
+	if errno != 0 {
+		err = errno
+		return err
+	}
+	return nil
+
 }
 
 func OpenDirNoFollow(dirFD int, path string) (int, error) {

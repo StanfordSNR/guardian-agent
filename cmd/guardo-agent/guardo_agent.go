@@ -91,21 +91,7 @@ func handleSymlink(dirFd *ga.Fd, target string, path string) error {
 }
 
 func handleLink(dirFd *ga.Fd, oldPath string, newPath string) error {
-	oldpathp, err := syscall.BytePtrFromString(oldPath)
-	if err != nil {
-		return err
-	}
-	newpathp, err := syscall.BytePtrFromString(newPath)
-	if err != nil {
-		return err
-	}
-	_, _, errno := syscall.Syscall6(syscall.SYS_LINKAT, uintptr(dirFd.GetFd()), uintptr(unsafe.Pointer(oldpathp)), uintptr(dirFd.GetFd()), uintptr(unsafe.Pointer(newpathp)), 0, 0)
-	if errno != 0 {
-		err = errno
-		return err
-	}
-	return nil
-
+	return ga.LinkNoFollow(int(dirFd.GetFd()), oldPath, int(dirFd.GetFd()), newPath, 0)
 }
 
 func handleUnlinkAt(dirFd *ga.Fd, path string, flags int32) error {
@@ -169,59 +155,27 @@ func handleFchmod(fd *ga.Fd, mode int32) error {
 }
 
 func handleChown(dirFd *ga.Fd, path string, owner int32, group int32) error {
-	return syscall.Fchownat(int(dirFd.GetFd()), path, int(owner), int(group), unix.AT_SYMLINK_NOFOLLOW)
+	return ga.ChownNoFollow(int(dirFd.GetFd()), path, int(owner), int(group), 0)
 }
 
 func handleLchown(dirFd *ga.Fd, path string, owner int32, group int32) error {
-	return syscall.Fchownat(int(dirFd.GetFd()), path, int(owner), int(group), unix.AT_SYMLINK_NOFOLLOW)
+	return ga.ChownNoFollow(int(dirFd.GetFd()), path, int(owner), int(group), unix.AT_SYMLINK_NOFOLLOW)
 }
 
 func handleFchownat(dirFd *ga.Fd, path string, owner int32, group int32, flags int32) error {
-	return syscall.Fchownat(int(dirFd.GetFd()), path, int(owner), int(group), int(flags))
+	return ga.ChownNoFollow(int(dirFd.GetFd()), path, int(owner), int(group), int(flags))
 }
 
 func handleFchown(fd *ga.Fd, owner int32, group int32) error {
-	return syscall.Fchown(int(fd.GetFd()), int(owner), int(group))
+	return unix.Fchown(int(fd.GetFd()), int(owner), int(group))
 }
 
 func handleUtimensat(dirFd *ga.Fd, pathname string, times []byte, flags int32) error {
-	pathp, err := syscall.BytePtrFromString(pathname)
-	if err != nil {
-		return err
-	}
-	if pathname == "" {
-		pathp = nil
-	}
-	timesPtr := uintptr(0)
-	if times != nil && len(times) > 0 {
-		timesPtr = uintptr(unsafe.Pointer(&times[0]))
-	}
-	_, _, errno := syscall.Syscall6(syscall.SYS_UTIMENSAT, uintptr(dirFd.GetFd()), uintptr(unsafe.Pointer(pathp)), timesPtr, uintptr(flags), 0, 0)
-	if errno != 0 {
-		err = errno
-		return err
-	}
-	return nil
+	return ga.UtimensatNoFollow(int(dirFd.GetFd()), pathname, times, flags)
 }
 
 func handleUtimes(dirFd *ga.Fd, pathname string, times []byte) error {
-	pathp, err := syscall.BytePtrFromString(pathname)
-	if err != nil {
-		return err
-	}
-	if pathname == "" {
-		pathp = nil
-	}
-	timesPtr := uintptr(0)
-	if times != nil && len(times) > 0 {
-		timesPtr = uintptr(unsafe.Pointer(&times[0]))
-	}
-	_, _, errno := syscall.Syscall(syscall.SYS_FUTIMESAT, uintptr(dirFd.GetFd()), uintptr(unsafe.Pointer(pathp)), timesPtr)
-	if errno != 0 {
-		err = errno
-		return err
-	}
-	return nil
+	return ga.Utimes(int(dirFd.GetFd()), pathname, times)
 }
 
 func handleSocket(domain int32, typeArg int32, protocol int32) (*ga.Fd, error) {
