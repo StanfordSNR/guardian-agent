@@ -209,6 +209,8 @@ type CommonOptions struct {
 	LogFile string `long:"log" description:"log file"`
 
 	Version bool `long:"version" short:"V" description:"Display the version number and exit"`
+
+	CpuProfile string `long:"prof"`
 }
 
 func (opts CommonOptions) GetCommon() *CommonOptions {
@@ -385,7 +387,7 @@ func getSigners(ui UI) []ssh.Signer {
 	}
 
 	var signers []ssh.Signer
-	for _, keyFile := range []string{"identity", "id_dsa", "id_rsa", "id_ecdsa", "id_ed25519"} {
+	for _, keyFile := range []string{"identity", "id_ed25519", "id_ecdsa", "id_dsa", "id_rsa"} {
 		keyPath := path.Join(UserSshDir(), keyFile)
 		if _, err := os.Stat(keyPath); os.IsNotExist(err) {
 			continue

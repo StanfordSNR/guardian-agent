@@ -1,3 +1,3 @@
-SUBDIRS = proto libaba gobuild
+SUBDIRS = proto libaba gobuild tests
 
 ACLOCAL_AMFLAGS="-Im4"

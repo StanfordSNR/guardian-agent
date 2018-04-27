@@ -3,7 +3,7 @@ AM_CXXFLAGS = $(PICKY_CXXFLAGS)
 
 lib_LTLIBRARIES = libhooks.la
 
-libhooks_la_LDFLAGS = -shared -module  -lsyscall_intercept -lprotobuf -lstdc++fs $(top_builddir)/proto/libguardoproto.la 
+libhooks_la_LDFLAGS = -shared -module  -lsyscall_intercept -lprofiler -lprotobuf -lstdc++fs $(top_builddir)/proto/libguardoproto.la 
 
 libhooks_la_LIBADD = $(top_builddir)/proto/syscalls.o
 

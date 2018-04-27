@@ -11,9 +11,11 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"reflect"
+	"runtime/pprof"
 	"syscall"
 	"unsafe"
 
@@ -567,6 +569,15 @@ func main() {
 
 	ga.ParseCommandLineOrDie(parser, &opts)
 
+	if opts.CpuProfile != "" {
+		f, err := os.Create(opts.CpuProfile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to open profiling output file: %s", err)
+			os.Exit(255)
+		}
+		pprof.StartCPUProfile(f)
+	}
+
 	authorizedKeysBytes, err := ioutil.ReadFile(opts.AuthorizedKeys)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load authorized_keys, err: %v\n", err)
@@ -647,8 +658,26 @@ func main() {
 		publicKeys:     publicKeys,
 	}
 
+	ints := make(chan os.Signal, 1)
+	signal.Notify(ints, os.Interrupt)
+	shutdown := false
+	go func() {
+		for range ints {
+			fmt.Fprintf(os.Stderr, "Got Interrupt signal, shutting down...\n")
+			if opts.CpuProfile != "" {
+				pprof.StopCPUProfile()
+			}
+			shutdown = true
+			s.Close()
+		}
+	}()
+
 	for {
 		inc, err := s.AcceptUnix()
+		if shutdown {
+			fmt.Fprintln(os.Stderr, "Shutdown complete")
+			os.Exit(0)
+		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error accepting connection: %s\n", err)
 			os.Exit(255)

@@ -57,8 +57,6 @@ type options struct {
 	Foreground bool `short:"f"`
 
 	Yubikey bool `short:"y"`
-
-	CpuProfile string `long:"prof"`
 }
 
 type incomingListener interface {
@@ -240,7 +238,7 @@ func main() {
 	for {
 		c, err = listener.Accept()
 		if shutdown {
-			fmt.Fprintln(os.Stderr, "Shutdown complete\n")
+			fmt.Fprintln(os.Stderr, "Shutdown complete")
 			os.Exit(0)
 		}
 		if err != nil {

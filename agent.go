@@ -27,6 +27,8 @@ const (
 type Agent struct {
 	policy Policy
 	store  *Store
+	signer ssh.Signer
+	kh     ssh.HostKeyCallback
 }
 
 func NewGuardian(policyConfigPath string, inType InputType) (*Agent, error) {
@@ -54,9 +56,21 @@ func NewGuardian(policyConfigPath string, inType InputType) (*Agent, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Failed to load policy store: %s", err)
 	}
+	signers := getSigners(ui)
+	if len(signers) == 0 {
+		return nil, fmt.Errorf("No valid signature keys")
+	}
+
+	kh, err := knownhosts.New(KnownHostsPath())
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get known hosts: %s", err)
+	}
+
 	return &Agent{
 			store:  store,
-			policy: Policy{Store: store, UI: ui}},
+			policy: Policy{Store: store, UI: ui},
+			signer: signers[0],
+			kh:     kh},
 		nil
 }
 
@@ -197,17 +211,10 @@ func (agent *Agent) handleExecutionRequest(conn net.Conn, scope Scope, cmd strin
 	return nil
 }
 
-func checkChallenge(scope Scope, challenge *Challenge) error {
-	kh, err := knownhosts.New(KnownHostsPath())
-	if err != nil {
-		return fmt.Errorf("Failed to get known hosts: %s", err)
-	}
-	if err != nil {
-		return fmt.Errorf("%s", err)
-	}
+func (agent *Agent) checkChallenge(scope Scope, challenge *Challenge) error {
 	for _, pkBytes := range challenge.GetServerPublicKeys() {
 		pk, err := ssh.ParsePublicKey(pkBytes)
-		if err == nil && kh(net.JoinHostPort(scope.ClientHostname, strconv.FormatUint(uint64(scope.ClientPort), 10)), &net.IPAddr{}, pk) == nil {
+		if err == nil && agent.kh(net.JoinHostPort(scope.ClientHostname, strconv.FormatUint(uint64(scope.ClientPort), 10)), &net.IPAddr{}, pk) == nil {
 			challenge.ServerPublicKeys = [][]byte{pkBytes}
 			return nil
 		}
@@ -216,7 +223,7 @@ func checkChallenge(scope Scope, challenge *Challenge) error {
 }
 
 func (agent *Agent) handleCredentialRequest(conn net.Conn, scope Scope, req *CredentialRequest) error {
-	err := checkChallenge(scope, req.GetChallenge())
+	err := agent.checkChallenge(scope, req.GetChallenge())
 	if err != nil {
 		writeCredentialResponse(conn, &CredentialResponse{Status: CredentialResponse_DENIED})
 		return fmt.Errorf("request BLOCKED due to invalid challenge: %s", err)
@@ -249,23 +256,18 @@ func writeCredentialResponse(conn net.Conn, resp *CredentialResponse) error {
 }
 
 func (agent *Agent) signCredential(cred *Credential) error {
-	signers := getSigners(agent.policy.UI)
-	if len(signers) == 0 {
-		return fmt.Errorf("No valid signature keys")
-	}
-	signer := signers[0]
 	nonce := make([]byte, 32)
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return err
 	}
 	cred.SignerNonce = nonce
-	cred.SignatureKey = signer.PublicKey().Marshal()
+	cred.SignatureKey = agent.signer.PublicKey().Marshal()
 
 	bytes_to_sign, err := proto.Marshal(cred)
 	if err != nil {
 		return err
 	}
-	sig, err := signer.Sign(rand.Reader, bytes_to_sign)
+	sig, err := agent.signer.Sign(rand.Reader, bytes_to_sign)
 	if err != nil {
 		return err
 	}

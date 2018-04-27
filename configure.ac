@@ -10,7 +10,7 @@ AC_CONFIG_HEADERS([config.h])
 LT_INIT(dlopen)
 
 # Add picky CXXFLAGS
-CXX17_FLAGS="-std=c++17 -pthread -fPIC"
+CXX17_FLAGS="-std=c++17 -pthread -fPIC -g"
 PICKY_CXXFLAGS="-pedantic -Wall -Wextra -Werror"
 AC_SUBST(ARFLAGS, "cr")
 AC_SUBST(AR_FLAGS, "cr")
@@ -41,5 +41,5 @@ AC_TYPE_UINT16_T
 
 # Checks for library functions.
 
-AC_CONFIG_FILES([Makefile proto/Makefile libaba/Makefile gobuild/Makefile])
+AC_CONFIG_FILES([Makefile proto/Makefile libaba/Makefile gobuild/Makefile tests/Makefile])
 AC_OUTPUT
