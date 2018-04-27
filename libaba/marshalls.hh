@@ -16,6 +16,12 @@ public:
     virtual ~ResultProcessor() {}
 };
 
+class IntProcessor : public ResultProcessor 
+{
+public:
+    bool Process(const Argument& arg, long* raw_result);
+};
+
 class SyscallMarshall {
 public:
     virtual google::protobuf::RepeatedPtrField<Argument> GetArgs() { return args; };
@@ -44,6 +50,20 @@ private:
 
     static Registry* Get();
 };
+
+template<class T>
+class Registrar
+{
+public:
+    Registrar(int syscall_number) 
+    { 
+        SyscallMarshallRegistry::Register(syscall_number, [](long raw_args[6]){ return new T(raw_args); });
+    }
+};
+
+#define REGISTER_SYSCALL_MARSHAL(sycall_number, class_name) \
+static Registrar<class_name> register_##sycall_number(sycall_number);
+
 
 }  // namespace guardian_agent
 

@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path"
 	"runtime"
+	"runtime/pprof"
 	"strings"
 	"syscall"
 
@@ -56,6 +57,8 @@ type options struct {
 	Foreground bool `short:"f"`
 
 	Yubikey bool `short:"y"`
+
+	CpuProfile string `long:"prof"`
 }
 
 type incomingListener interface {
@@ -128,6 +131,15 @@ func main() {
 		}
 	} else {
 		log.SetOutput(ioutil.Discard)
+	}
+
+	if opts.CpuProfile != "" {
+		f, err := os.Create(opts.CpuProfile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to open profiling output file: %s", err)
+			os.Exit(255)
+		}
+		pprof.StartCPUProfile(f)
 	}
 
 	var conf Config
@@ -212,6 +224,9 @@ func main() {
 	go func() {
 		for range ints {
 			fmt.Fprintf(os.Stderr, "Got Interrupt signal, shutting down...\n")
+			if opts.CpuProfile != "" {
+				pprof.StopCPUProfile()
+			}
 			shutdown = true
 			listener.Close()
 		}

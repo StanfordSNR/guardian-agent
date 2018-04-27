@@ -269,6 +269,84 @@ static void hook(long syscall_number, long raw_args[6], long int* result)
 
 thread_local bool in_hook = false; 
 
+static bool fake_root = false;
+
+static uid_t uid = 0; 
+static uid_t euid = 0; 
+static uid_t suid = 0;
+static gid_t gid = 0; 
+static gid_t egid = 0; 
+static gid_t sgid = 0; 
+
+
+bool hook_uid_call(long syscall_number,
+                     long arg0, 
+                     long arg1,
+                     long arg2,
+                     long *result) 
+{
+    if (syscall_number == SYS_geteuid) {
+        *result = euid;
+        return true;
+    }
+    if (syscall_number == SYS_getuid) {
+        *result = uid;
+        return true;
+    }
+    if (syscall_number == SYS_getgid) {
+        *result = gid;
+        return true;
+    }
+    if (syscall_number == SYS_getegid) {
+        *result = egid;
+        return true;
+    }
+    if (syscall_number == SYS_getresuid) {
+        *(uid_t*)arg0 = uid;
+        *(uid_t*)arg1 = euid;
+        *(uid_t*)arg2 = suid;
+        *result = 0;
+        return true;
+    }
+    if (syscall_number == SYS_getresgid) {
+        *(uid_t*)arg0 = gid;
+        *(uid_t*)arg1 = egid;
+        *(uid_t*)arg2 = sgid;
+        *result = 0;
+        return true;
+    }
+
+    if (syscall_number == SYS_setgid) {
+        gid = (gid_t)arg0;
+        *result = 0;
+        return true;
+    }
+
+    if (syscall_number == SYS_setresuid) {
+        uid = (uid_t)arg0;
+        euid = (uid_t)arg1;
+        suid = (uid_t)arg2;
+        *result = 0;
+        return true;
+    }
+    if (syscall_number == SYS_setresgid) {
+        gid = (uid_t)arg0;
+        egid = (uid_t)arg1;
+        sgid = (uid_t)arg2;
+        *result = 0;
+        return true;
+    }
+
+    if ((syscall_number == SYS_setgroups) ||
+        (syscall_number == SYS_setpgid) ||
+        (syscall_number == SYS_setregid) ||
+        (syscall_number == SYS_setreuid)) {
+        *result = 0;
+        return true;
+    }
+    return false;
+}
+
 static int safe_hook(long syscall_number,
                      long arg0, 
                      long arg1,
@@ -278,16 +356,7 @@ static int safe_hook(long syscall_number,
                      long arg5,
                      long *result)
 {
-    if ((syscall_number == SYS_geteuid) || 
-        (syscall_number == SYS_getuid) || 
-        (syscall_number == SYS_setgid) || 
-        (syscall_number == SYS_setgroups) ||
-        (syscall_number == SYS_setresuid) ||
-        (syscall_number == SYS_setresgid) ||
-        (syscall_number == SYS_setpgid) ||
-        (syscall_number == SYS_setregid) ||
-        (syscall_number == SYS_setreuid)) {
-        *result = 0;
+    if (fake_root && hook_uid_call(syscall_number, arg0, arg1, arg2, result)) { 
         return 0;
     }
     if (!SyscallMarshallRegistry::IsRegistered(syscall_number)) {

@@ -12,6 +12,7 @@ libhooks_la_SOURCES = util.hh \
 	address.hh address.cc \
 	hooks.cc \
 	marshalls.hh marshalls.cc \
+	sendmsg_marshall.hh sendmsg_marshall.cc \
 	socket.hh socket.cc \
 	poller.hh poller.cc \
 	timestamp.hh timestamp.cc \

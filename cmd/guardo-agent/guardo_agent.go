@@ -190,7 +190,11 @@ func handleUtimensat(dirFd *ga.Fd, pathname string, times []byte, flags int32) e
 	if pathname == "" {
 		pathp = nil
 	}
-	_, _, errno := syscall.Syscall6(syscall.SYS_UTIMENSAT, uintptr(dirFd.GetFd()), uintptr(unsafe.Pointer(pathp)), uintptr(unsafe.Pointer(&times[0])), uintptr(flags), 0, 0)
+	timesPtr := uintptr(0)
+	if times != nil && len(times) > 0 {
+		timesPtr = uintptr(unsafe.Pointer(&times[0]))
+	}
+	_, _, errno := syscall.Syscall6(syscall.SYS_UTIMENSAT, uintptr(dirFd.GetFd()), uintptr(unsafe.Pointer(pathp)), timesPtr, uintptr(flags), 0, 0)
 	if errno != 0 {
 		err = errno
 		return err
@@ -206,7 +210,11 @@ func handleUtimes(dirFd *ga.Fd, pathname string, times []byte) error {
 	if pathname == "" {
 		pathp = nil
 	}
-	_, _, errno := syscall.Syscall(syscall.SYS_FUTIMESAT, uintptr(dirFd.GetFd()), uintptr(unsafe.Pointer(pathp)), uintptr(unsafe.Pointer(&times[0])))
+	timesPtr := uintptr(0)
+	if times != nil && len(times) > 0 {
+		timesPtr = uintptr(unsafe.Pointer(&times[0]))
+	}
+	_, _, errno := syscall.Syscall(syscall.SYS_FUTIMESAT, uintptr(dirFd.GetFd()), uintptr(unsafe.Pointer(pathp)), timesPtr)
 	if errno != 0 {
 		err = errno
 		return err
@@ -228,6 +236,10 @@ func handleBind(sock *ga.Fd, addr []byte, addrlen int32) error {
 		return err
 	}
 	return nil
+}
+
+func handleSendmsg(fd *ga.Fd, data []byte, oob []byte, flags int32) (int, error) {
+	return syscall.SendmsgN(int(fd.GetFd()), data, oob, nil, int(flags))
 }
 
 func (guardo *guardoAgent) checkCredential(req *ga.ElevationRequest, challenge *ga.Challenge, callerCred *syscall.Ucred) error {
@@ -542,6 +554,7 @@ var handlerRegistry = map[int32]interface{}{
 	syscall.SYS_FCHOWNAT:   handleFchownat,
 	syscall.SYS_UTIMES:     handleUtimes,
 	syscall.SYS_UTIMENSAT:  handleUtimensat,
+	syscall.SYS_SENDMSG:    handleSendmsg,
 }
 
 func main() {

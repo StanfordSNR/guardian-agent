@@ -21,18 +21,14 @@ public:
     }
 };
 
-class IntProcessor : public ResultProcessor 
-{
-public:
-    bool Process(const Argument& arg, long* raw_result) 
-    {
-        if (arg.arg_case() != Argument::kIntArg) {
-            return false;
-        }
-        *raw_result = arg.int_arg();
-        return true;
+ bool IntProcessor::Process(const Argument& arg, long* raw_result)
+ {
+    if (arg.arg_case() != Argument::kIntArg) {
+        return false;
     }
-};
+    *raw_result = arg.int_arg();
+    return true;
+}
 
 class OutBufferProcessor : public ResultProcessor 
 {
@@ -105,7 +101,11 @@ public:
                             len = raw_args[len_param];
                         }
                     }
-                    args.Add()->set_bytes_arg(std::string((const char*)raw_args[i], len));
+                    if (raw_args[i] == 0) {
+                         args.Add()->set_bytes_arg("");
+                    } else {
+                        args.Add()->set_bytes_arg(std::string((const char*)raw_args[i], len));
+                    }
                     break;
                 }
                 case Param::OUT_BUFFER: {
@@ -159,19 +159,6 @@ bool SyscallMarshallRegistry::IsRegistered(long syscall_number)
     auto& registry = *Get();
     return (registry.find(syscall_number) != registry.end());
 }
-
-template<class T>
-class Registrar
-{
-public:
-    Registrar(int syscall_number) 
-    { 
-        SyscallMarshallRegistry::Register(syscall_number, [](long raw_args[6]){ return new T(raw_args); });
-    }
-};
-
-#define REGISTER_SYSCALL_MARSHAL(sycall_number, class_name) \
-static Registrar<class_name> register_##sycall_number(sycall_number);
 
 void SyscallMarshallRegistry::Register(long syscall_number, FactoryFunc factory_func) 
 {
