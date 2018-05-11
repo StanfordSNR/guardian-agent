@@ -13,6 +13,9 @@ import (
 const SYS_RENAMEAT2 = 316
 
 func split(path string) (base string, last string) {
+	if path == "" {
+		return
+	}
 	for ; strings.HasSuffix(path, "//"); path = path[0 : len(path)-1] {
 	}
 	last = path[strings.LastIndex(path[0:len(path)-1], "/")+1:]
@@ -197,11 +200,7 @@ func StatNoFollow(dirFD int, path string, stat *unix.Stat_t, flags int) error {
 
 	// If user did not specify O_NOFOLLOW, but the path points to a symbolic link
 	// we force-fail the syscall.
-	if flags&unix.AT_SYMLINK_NOFOLLOW != 0 {
-		return nil
-	}
-
-	if stat.Mode&syscall.S_IFMT == syscall.S_IFLNK {
+	if flags&unix.AT_SYMLINK_NOFOLLOW == 0 && stat.Mode&syscall.S_IFMT == syscall.S_IFLNK {
 		return syscall.ELOOP
 	}
 
@@ -277,47 +276,70 @@ func ChmodNoFollow(dirFD int, path string, mode uint32, flags int) error {
 	}
 	// If user did not specify O_NOFOLLOW, but the path points to a symbolic link
 	// we force-fail the syscall.
-	if flags&unix.AT_SYMLINK_NOFOLLOW != 0 && stats.Mode&syscall.S_IFMT == syscall.S_IFLNK {
+	if flags&unix.AT_SYMLINK_NOFOLLOW == 0 && stats.Mode&syscall.S_IFMT == syscall.S_IFLNK {
 		return syscall.ELOOP
 	}
 
 	return unix.Fchmodat(dirFD, last, mode, flags&unix.AT_SYMLINK_NOFOLLOW)
 }
 
-func ChownNoFollow(dirFd int, path string, owner int, group int, flags int) error {
+func ChownNoFollow(dirFD int, path string, owner int, group int, flags int) error {
+	var err error
+	last := ""
 	if path != "" {
-		openFlags := unix.O_PATH
-		if flags&unix.AT_SYMLINK_NOFOLLOW != 0 {
-			openFlags |= unix.O_NOFOLLOW
-		}
-		var err error
-		dirFd, err = OpenNoFollow(dirFd, path, openFlags, 0)
+		base, last := split(path)
+		dirFD, err = OpenDirNoFollow(dirFD, base)
 		if err != nil {
 			return err
 		}
-		defer unix.Close(dirFd)
+		defer unix.Close(dirFD)
+
+		stats := unix.Stat_t{}
+		err = unix.Fstatat(dirFD, last, &stats, unix.AT_SYMLINK_NOFOLLOW)
+		if err != nil {
+			return err
+		}
+		// If user did not specify O_NOFOLLOW, but the path points to a symbolic link
+		// we force-fail the syscall.
+		if flags&unix.AT_SYMLINK_NOFOLLOW == 0 && stats.Mode&syscall.S_IFMT == syscall.S_IFLNK {
+			return syscall.ELOOP
+		}
 	}
-	return unix.Fchownat(dirFd, "", owner, group, flags|unix.AT_EMPTY_PATH)
+	return unix.Fchownat(dirFD, last, owner, group, flags|unix.AT_EMPTY_PATH)
 }
 
-func UtimensatNoFollow(dirFd int, path string, times []byte, flags int32) error {
+func UtimensatNoFollow(dirFD int, path string, times []byte, flags int32) error {
 	var err error
+	pathRawPtr := uintptr(0)
 	if path != "" {
-		openFlags := 0
-		if flags&unix.AT_SYMLINK_NOFOLLOW != 0 {
-			openFlags |= unix.O_NOFOLLOW
-		}
-		dirFd, err = OpenNoFollow(dirFd, path, openFlags, 0)
+		base, last := split(path)
+		dirFD, err = OpenDirNoFollow(dirFD, base)
 		if err != nil {
 			return err
 		}
-		defer unix.Close(dirFd)
+		defer unix.Close(dirFD)
+
+		stats := unix.Stat_t{}
+		err = unix.Fstatat(dirFD, last, &stats, unix.AT_SYMLINK_NOFOLLOW)
+		if err != nil {
+			return err
+		}
+		// If user did not specify O_NOFOLLOW, but the path points to a symbolic link
+		// we force-fail the syscall.
+		if flags&unix.AT_SYMLINK_NOFOLLOW == 0 && stats.Mode&syscall.S_IFMT == syscall.S_IFLNK {
+			return syscall.ELOOP
+		}
+		lastp, err := syscall.BytePtrFromString(last)
+		if err != nil {
+			return err
+		}
+		pathRawPtr = uintptr(unsafe.Pointer(lastp))
 	}
 	timesPtr := uintptr(0)
 	if times != nil && len(times) > 0 {
 		timesPtr = uintptr(unsafe.Pointer(&times[0]))
 	}
-	_, _, errno := syscall.Syscall6(syscall.SYS_UTIMENSAT, uintptr(dirFd), uintptr(0), timesPtr, uintptr(flags), 0, 0)
+	_, _, errno := syscall.Syscall6(syscall.SYS_UTIMENSAT, uintptr(dirFD), pathRawPtr, timesPtr, uintptr(flags), 0, 0)
 	if errno != 0 {
 		err = errno
 		return err
@@ -325,20 +347,20 @@ func UtimensatNoFollow(dirFd int, path string, times []byte, flags int32) error 
 	return nil
 }
 
-func Utimes(dirFd int, path string, times []byte) error {
+func Utimes(dirFD int, path string, times []byte) error {
 	var err error
 	if path != "" {
-		dirFd, err = OpenNoFollow(dirFd, path, 0, 0)
+		dirFD, err = OpenNoFollow(dirFD, path, 0, 0)
 		if err != nil {
 			return err
 		}
-		defer unix.Close(dirFd)
+		defer unix.Close(dirFD)
 	}
 	timesPtr := uintptr(0)
 	if times != nil && len(times) > 0 {
 		timesPtr = uintptr(unsafe.Pointer(&times[0]))
 	}
-	_, _, errno := syscall.Syscall(syscall.SYS_FUTIMESAT, uintptr(dirFd), uintptr(0), timesPtr)
+	_, _, errno := syscall.Syscall(syscall.SYS_FUTIMESAT, uintptr(dirFD), uintptr(0), timesPtr)
 	if errno != 0 {
 		err = errno
 		return err
@@ -389,7 +411,7 @@ const (
 
 func NewSafePath(path string) (*SafePath, error) {
 	if !filepath.IsAbs(origPath) {
-		return nil, fmt.Erorrf("Path %s is not absolute", path)
+		return nil, fmt.Errorf("Path %s is not absolute", path)
 	}
 	sp := SafePath{OrigPath: path}
 	curPath := "/"
