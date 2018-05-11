@@ -202,6 +202,10 @@ func handleWrite(fd *ga.Fd, buf []byte, count int32) (int, error) {
 	return syscall.Write(int(fd.GetFd()), buf)
 }
 
+func handleMount(source string, target string, fstype string, flags int32, data string) error {
+	return syscall.Mount(source, target, fstype, uintptr(flags), data)
+}
+
 func (guardo *guardoAgent) checkCredential(req *ga.ElevationRequest, challenge *ga.Challenge, callerCred *syscall.Ucred) error {
 	cred := req.GetCredential()
 	if !proto.Equal(req.GetOp(), cred.GetOp()) {
@@ -423,7 +427,7 @@ func (guardo *guardoAgent) getRequestHandler(op *ga.Operation, fds []int) (func(
 
 	handler := handlerRegistry[op.SyscallNum]
 	if handler == nil {
-		return nil, fmt.Errorf("Unknown sycall request type")
+		return nil, fmt.Errorf("Unknown syscall request type")
 	}
 	if reflect.TypeOf(handler).Kind() != reflect.Func {
 		return nil, fmt.Errorf("Invalid handler for syscall: %d", op.SyscallNum)
@@ -516,6 +520,7 @@ var handlerRegistry = map[int32]interface{}{
 	syscall.SYS_UTIMENSAT:  handleUtimensat,
 	syscall.SYS_SENDMSG:    handleSendmsg,
 	syscall.SYS_WRITE:      handleWrite,
+	syscall.SYS_MOUNT:      handleMount,
 }
 
 func main() {

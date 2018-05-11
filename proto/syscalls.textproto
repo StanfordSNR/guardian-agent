@@ -556,3 +556,27 @@ syscall {
     }
 }
 
+syscall {
+    name: "mount"
+    num: 165
+    params {
+        name: "source"
+        type: STRING
+    }
+    params {
+        name: "target"
+        type: STRING
+    }
+    params {
+        name: "filesystemtype"
+        type: STRING
+    }
+    params {
+        name: "mountflags"
+        type: INT32
+    }
+    params {
+        name: "data"
+        type: STRING
+    }
+}
