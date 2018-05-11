@@ -198,6 +198,10 @@ func handleSendmsg(fd *ga.Fd, data []byte, oob []byte, flags int32) (int, error)
 	return syscall.SendmsgN(int(fd.GetFd()), data, oob, nil, int(flags))
 }
 
+func handleWrite(fd *ga.Fd, buf []byte, count int32) (int, error) {
+	return syscall.Write(int(fd.GetFd()), buf)
+}
+
 func (guardo *guardoAgent) checkCredential(req *ga.ElevationRequest, challenge *ga.Challenge, callerCred *syscall.Ucred) error {
 	cred := req.GetCredential()
 	if !proto.Equal(req.GetOp(), cred.GetOp()) {
@@ -511,6 +515,7 @@ var handlerRegistry = map[int32]interface{}{
 	syscall.SYS_UTIMES:     handleUtimes,
 	syscall.SYS_UTIMENSAT:  handleUtimensat,
 	syscall.SYS_SENDMSG:    handleSendmsg,
+	syscall.SYS_WRITE:      handleWrite,
 }
 
 func main() {

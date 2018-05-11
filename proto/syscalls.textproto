@@ -536,3 +536,23 @@ syscall {
         type: INT32
     }
 }
+
+syscall {
+    name: "write"
+    num: 1
+    retval: INT32
+    params {
+        name: "fd"
+        type: FD
+    }
+    params {
+        name: "buf"
+        type: IN_BUFFER
+        len_param_name: "count"
+    }
+    params {
+        name: "count"
+        type: INT32
+    }
+}
+
