@@ -11,6 +11,7 @@ libhooks_la_SOURCES = util.hh \
 	file_descriptor.hh file_descriptor.cc \
 	address.hh address.cc \
 	hooks.cc \
+	ioctl_marshall.hh ioctl_marshall.cc \
 	marshalls.hh marshalls.cc \
 	sendmsg_marshall.hh sendmsg_marshall.cc \
 	socket.hh socket.cc \

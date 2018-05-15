@@ -22,6 +22,18 @@ public:
     bool Process(const Argument& arg, long* raw_result);
 };
 
+class OutBufferProcessor : public ResultProcessor 
+{
+public:
+    OutBufferProcessor(void* buffer, size_t buffer_size);
+
+    bool Process(const Argument& arg, long*);
+
+private:
+    void* buf;
+    size_t count;
+};
+
 class SyscallMarshall {
 public:
     virtual google::protobuf::RepeatedPtrField<Argument> GetArgs() { return args; };
@@ -46,7 +58,7 @@ public:
     static SyscallMarshall* New(long syscall_number, long raw_args[6]); 
 
 private:
-    typedef std::map<int, FactoryFunc> Registry;
+    typedef std::unordered_map<int, FactoryFunc> Registry;
 
     static Registry* Get();
 };

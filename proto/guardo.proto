@@ -22,6 +22,7 @@ message Argument {
         Fd fd_arg = 4;
         bytes bytes_arg = 5;
         OutBuffer out_buffer_arg = 6;
+        bytes in_out_buffer_arg = 8;
         string path_arg = 7;
     }
     bool hidden = 100;

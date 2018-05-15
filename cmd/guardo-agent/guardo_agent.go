@@ -206,6 +206,14 @@ func handleMount(source string, target string, fstype string, flags int32, data 
 	return syscall.Mount(source, target, fstype, uintptr(flags), data)
 }
 
+func handleIoctl(fd *ga.Fd, request int32, buffer []byte) error {
+	_, _, err := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd.GetFd()), uintptr(request), uintptr(unsafe.Pointer(&buffer[0])))
+	if err != 0 {
+		return err
+	}
+	return nil
+}
+
 func (guardo *guardoAgent) checkCredential(req *ga.ElevationRequest, challenge *ga.Challenge, callerCred *syscall.Ucred) error {
 	cred := req.GetCredential()
 	if !proto.Equal(req.GetOp(), cred.GetOp()) {
@@ -422,6 +430,10 @@ func (guardo *guardoAgent) getRequestHandler(op *ga.Operation, fds []int) (func(
 			outBuffer := reflect.ValueOf(make([]byte, arg.OutBufferArg.Len))
 			argList = append(argList, outBuffer)
 			results = append(results, outBuffer)
+		case *ga.Argument_InOutBufferArg:
+			buf := reflect.ValueOf(arg.InOutBufferArg)
+			argList = append(argList, buf)
+			results = append(results, buf)
 		}
 	}
 
@@ -521,6 +533,7 @@ var handlerRegistry = map[int32]interface{}{
 	syscall.SYS_SENDMSG:    handleSendmsg,
 	syscall.SYS_WRITE:      handleWrite,
 	syscall.SYS_MOUNT:      handleMount,
+	syscall.SYS_IOCTL:      handleIoctl,
 }
 
 func main() {

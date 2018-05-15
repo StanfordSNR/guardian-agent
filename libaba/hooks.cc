@@ -267,9 +267,10 @@ static void hook(long syscall_number, long raw_args[6], long int* result)
     *result = marshall->ProcessResponse(elevation_response);
 }
 
-thread_local bool in_hook = false; 
+/*thread_local*/
+bool in_hook = false; 
 
-static bool fake_root = false;
+static bool fake_root = true;
 
 static uid_t uid = 0; 
 static uid_t euid = 0; 

@@ -30,14 +30,11 @@ public:
     return true;
 }
 
-class OutBufferProcessor : public ResultProcessor 
-{
-public:
-    OutBufferProcessor(void* buffer, size_t buffer_size)
+OutBufferProcessor::OutBufferProcessor(void* buffer, size_t buffer_size)
     : buf(buffer), count(buffer_size) {}
 
-    bool Process(const Argument& arg, long*)
-    {
+bool OutBufferProcessor::Process(const Argument& arg, long*)
+{
         if (arg.arg_case() != Argument::kBytesArg) {
             return false;
         }
@@ -46,12 +43,7 @@ public:
         }
         memcpy(buf, arg.bytes_arg().data(), arg.bytes_arg().size());
         return true;
-    }
-
-private:
-    void* buf;
-    size_t count;
-};
+}
 
 class DynamicMarshall : public SyscallMarshall 
 {
