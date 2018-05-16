@@ -28,6 +28,8 @@ namespace proto = google::protobuf;
 
 static const char* AGENT_GUARD_SOCK_NAME = ".agent-guard-sock";
 static const char* GUARDO_SOCK_NAME = ".guardo-sock";
+static const char* FAKE_ROOT_ENV = "GUARDO_FAKE_ROOT";
+
 
 
 std::unique_ptr<FileDescriptor> marshal_fds(Operation* op, std::vector<int>* fds) {
@@ -270,7 +272,7 @@ static void hook(long syscall_number, long raw_args[6], long int* result)
 /*thread_local*/
 bool in_hook = false; 
 
-static bool fake_root = true;
+static bool fake_root = false;
 
 static uid_t uid = 0; 
 static uid_t euid = 0; 
@@ -402,5 +404,10 @@ init(void)
  
     for (const auto& spec : syscalls.syscall()) {
         guardian_agent::SyscallMarshallRegistry::Register(spec);
+    }
+
+    const char* dir = std::getenv(guardian_agent::FAKE_ROOT_ENV);
+    if (dir != 0) {
+        guardian_agent::fake_root = true;
     }
 }
