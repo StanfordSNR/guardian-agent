@@ -16,13 +16,17 @@ function cleanup {
     rm $PIPE
 }
 
-SOCKET="$(ssh -q -i ~/.ssh/auth-key-cert.pub -o BatchMode=yes $1@$2 "$(typeset -f); mux" < /dev/null)"
+USER=$1
+HOST=$2
+STDIN_PIPE=$3
+SSH_INPUT_PIPE=$4
+SOCKET="$(ssh -q -i ~/.ssh/auth-key-cert.pub -o BatchMode=yes $USER@$HOST "$(typeset -f); mux" < /dev/null)"
 while kill -0 $PPID > /dev/null; do
-    go run conn.go $1 $2 $SOCKET
+    go run conn.go $USER $HOST $SOCKET $STDIN_PIPE $SSH_INPUT_PIPE
     if ! kill -0 $PPID > /dev/null; then 
         break
     fi
     eval `ssh-agent -s` > /dev/null
     ssh-add -s /usr/local/lib/libykcs11_YUBICO.dylib > /dev/null
 done
-ssh -q -i ~/.ssh/auth-key-cert.pub -o BatchMode=yes $1@$2 "$(typeset -f); cleanup $SOCKET"
+ssh -q -i ~/.ssh/auth-key-cert.pub -o BatchMode=yes $USER@$HOST "$(typeset -f); cleanup $SOCKET"

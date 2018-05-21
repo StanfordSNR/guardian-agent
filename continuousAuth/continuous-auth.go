@@ -6,6 +6,10 @@ import(
     "fmt"
     "strings"
     "os/user"
+    "io/ioutil"
+    "syscall"
+    "bufio"
+    "io"
 )
 
 const tokenLib = "/usr/local/lib/libykcs11_YUBICO.dylib"
@@ -19,12 +23,13 @@ func main() {
         fmt.Printf("Error parsing arguments: %s\n", parseErr)
         return
     }
-    //generateErr := generateCert(user, host)
-    //if generateErr != nil {
-    //    fmt.Println("Error generating certificate: %s\n", generateErr)
-    //    return
-    //}
-    startAuthLoop(user, host)
+    generateErr := generateCert(user, host)
+    if generateErr != nil {
+        fmt.Println("Error generating certificate: %s\n", generateErr)
+        return
+    }
+    stdinPipe, sshInputPipe := pipeSetup()
+    startAuthLoop(user, host, stdinPipe, sshInputPipe)
 }
 
 // Return user, host, error
@@ -64,11 +69,67 @@ func generateCert(username string, hostname string) error {
     return nil
 }
 
+func pipeSetup() (string, string) {
+    tmpFile1, _ := ioutil.TempFile("/tmp", "user-input")
+    name1 := tmpFile1.Name()
+    os.Remove(tmpFile1.Name())
+    syscall.Mkfifo(name1, 0666)
+    go readStdinIntoPipe(name1)
+
+    tmpFile2, _ := ioutil.TempFile("/tmp", "ssh-input")
+    name2 := tmpFile2.Name()
+    os.Remove(tmpFile2.Name())
+    syscall.Mkfifo(name2, 0666)
+
+    return name1, name2
+
+}
+
+func readStdinIntoPipe(pipe string) {
+    f, err := os.OpenFile(pipe, os.O_RDWR, 0644)
+    if err != nil {
+        fmt.Printf("Error opening pipe %s: %s", pipe, err)
+    }
+    stdinReader := bufio.NewReader(os.Stdin)
+    for {
+        b,_ := stdinReader.ReadByte()
+        n, err := f.Write([]byte{b})
+        if n != 1 || err != nil {
+            fmt.Printf("Error reading from stdin into pipe: %s", err)
+        }
+    }
+}
+
+func writeSshInputIntoPipe(inPipe string, outPipe io.WriteCloser) {
+    in, err := os.OpenFile(inPipe, os.O_RDWR, 0644)
+    if err != nil {
+        fmt.Printf("Error opening pipe %s: %s", inPipe, err)
+    }
+    buffer := make([]byte, 1)
+    for {
+        n, err := in.Read(buffer)
+        if err != nil {
+            fmt.Printf("Error reading from ssh input: %s", err)
+        }
+        if n != 1 {
+            fmt.Printf("Read no bytes.")
+        }
+        bytesWritten, errWrite := outPipe.Write(buffer)
+        if bytesWritten != n || errWrite != nil {
+            fmt.Printf("Error reading from ssh input into pipe: %s", errWrite)
+        }
+    }
+}
+
 // Run ssh continuously authenticating.
-func startAuthLoop(username string, hostname string) {
-    cmd := exec.Command("ssh", "-o", fmt.Sprintf("ProxyCommand bash -c \"source auth-loop.sh %s %s\"", username, hostname), "-i", authKeyCert, fmt.Sprintf("%s@%s", username, hostname))
+func startAuthLoop(username string, hostname string, stdinPipe string, sshInputPipe string) {
+    cmd := exec.Command("ssh", "-o", fmt.Sprintf("ProxyCommand bash -c \"source auth-loop.sh %s %s %s %s\"", username, hostname, stdinPipe, sshInputPipe), "-i", authKeyCert, "-tt", fmt.Sprintf("%s@%s", username, hostname))
     cmd.Env = append(os.Environ())
-    cmd.Stdin = os.Stdin
+    stdin, err := cmd.StdinPipe()
+    if err != nil {
+        fmt.Printf("Can't get stdin pipe")
+    }
+    go writeSshInputIntoPipe(sshInputPipe, stdin)
     cmd.Stdout = os.Stdout
     cmd.Stderr = os.Stderr
     cmd.Start()

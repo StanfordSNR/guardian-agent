@@ -7,25 +7,36 @@ import(
     "time"
     "bytes"
     "strings"
+    "sync"
 )
 
 const authKeyCert = "~/.ssh/auth-key-cert.pub"
 const tokenLib = "/usr/local/lib/libykcs11_YUBICO.dylib"
+
+var auth = false
+var authLock sync.RWMutex
 
 func main() {
     args := os.Args[1:]
     username := args[0]
     hostname := args[1]
     socket := args[2]
+    stdinPipe := args[3]
+    sshInputPipe := args[4]
+    startAuthCh := make(chan bool, 1)
+    go filterInput(stdinPipe, sshInputPipe)
+    go checkAuthStatus(&startAuthCh)
+
     for {
-        start := time.Now()
         timedAuth(username, hostname, socket)
-        elapsed := time.Now().Sub(start)
-        noAuth := elapsed < 9 * time.Second
+        startAuthCh <- true
+        authLock.RLock()
+        authCopy := auth
+        authLock.RUnlock()
         keyPresent := isYubikeyPresent()
         if !keyPresent {
             time.Sleep(time.Second)
-        } else if noAuth && keyPresent {
+        } else if !authCopy && keyPresent {
             // Just plugged in key.
            return
         }
@@ -55,11 +66,39 @@ func isYubikeyPresent() bool {
     return strings.Contains(outb.String(), "Yubikey")
 }
 
-func enterPasscode() {
-    eval := exec.Command("eval", "`ssh-agent -s`")
-    eval.Env = append(os.Environ())
-    eval.Run()
-    add := exec.Command("ssh-add", fmt.Sprintf("-s %s", tokenLib))
-    add.Env = append(os.Environ())
-    add.Run()
+func checkAuthStatus(startAuthCh *chan bool) {
+    start := time.Now()
+    for {
+        select {
+        case <- time.After(100*time.Millisecond):
+            if (time.Since(start).Seconds() > 2) {
+                authLock.Lock()
+                auth = true
+                authLock.Unlock()
+            }
+
+        case <- *startAuthCh:
+            if time.Since(start).Seconds() < 2 {
+                authLock.Lock()
+                auth = false
+                authLock.Unlock()
+            }
+            start = time.Now()
+        }
+   }
+}
+
+func filterInput(stdinPipe string, sshInputPipe string) {
+    in,_  := os.OpenFile(stdinPipe, os.O_RDWR, 0644)
+    out,_ := os.OpenFile(sshInputPipe, os.O_RDWR, 0644)
+    buffer := make([]byte, 1)
+    for {
+        in.Read(buffer)
+        authLock.RLock()
+        authCopy := auth
+        authLock.RUnlock()
+        if authCopy {
+            out.Write(buffer)
+        }
+    }
 }
