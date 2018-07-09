@@ -100,9 +100,9 @@ sudo cp sga_linux_amd64/* /usr/local/bin
 <details><summary>macOS installation</summary><p>
 
 ```
-brew install autossh ssh-askpass
-curl -L https://api.github.com/repos/StanfordSNR/guardian-agent/releases/latest | grep browser_download_url | grep 'darwin' | cut -d'"' -f 4 | xargs curl -L | tar xzv
-sudo cp sga_darwin_amd64/* /usr/local/bin
+brew tap theseal/ssh-askpass
+brew tap theseal/guardian-agent
+brew install guardian-agent
 ```
 
 </p>
