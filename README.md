@@ -97,6 +97,17 @@ sudo cp sga_linux_amd64/* /usr/local/bin
 </p>
 </details>
 
+<details><summary>CentOS / Fedora installation</summary><p>
+
+```
+sudo yum install -y mosh openssh-clients autossh openssh-askpass
+curl -L https://api.github.com/repos/StanfordSNR/guardian-agent/releases/latest | grep browser_download_url | grep 'linux' | cut -d'"' -f 4 | xargs curl -Ls | tar xzv
+sudo cp sga_linux_amd64/* /usr/local/bin
+```
+
+</p>
+</details>
+
 <details><summary>macOS installation</summary><p>
 
 ```
