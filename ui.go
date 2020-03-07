@@ -24,7 +24,9 @@ type UI interface {
 type FancyTerminalUI struct {
 	mu sync.Mutex
 }
-type AskPassUI struct{}
+type AskPassUI struct {
+	askPass string
+}
 
 type Prompt struct {
 	Question string
@@ -108,12 +110,21 @@ func (tui *FancyTerminalUI) Confirm(msg string) bool {
 	return err == nil && ans == 1
 }
 
-func (AskPassUI) Ask(params Prompt) (reply int, err error) {
+func NewAskPassUI() *AskPassUI {
+	askPass := os.Getenv("SSH_ASKPASS")
+	if askPass != "" {
+		return &AskPassUI{askPass: askPass}
+	}
+	return &AskPassUI{askPass: "ssh-askpass"}
+
+}
+
+func (aui *AskPassUI) Ask(params Prompt) (reply int, err error) {
 	reply = -1
 	var convErr error
 
 	for convErr != nil || reply <= 0 || reply > len(params.Choices) { // 1 indexed
-		cmd := exec.Command("ssh-askpass", formatPrompt(params))
+		cmd := exec.Command(aui.askPass, formatPrompt(params))
 		out, err := cmd.Output()
 		if err != nil {
 			return reply, err
@@ -125,17 +136,17 @@ func (AskPassUI) Ask(params Prompt) (reply int, err error) {
 	return
 }
 
-func (AskPassUI) Inform(msg string) {
+func (aui *AskPassUI) Inform(msg string) {
 	fmt.Println(msg)
 }
 
-func (AskPassUI) Alert(msg string) {
-	cmd := exec.Command("ssh-askpass", msg)
+func (aui *AskPassUI) Alert(msg string) {
+	cmd := exec.Command(aui.askPass, msg)
 	cmd.Run()
 }
 
-func (AskPassUI) AskPassword(msg string) (string, error) {
-	cmd := exec.Command("ssh-askpass", msg)
+func (aui *AskPassUI) AskPassword(msg string) (string, error) {
+	cmd := exec.Command(aui.askPass, msg)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -143,8 +154,8 @@ func (AskPassUI) AskPassword(msg string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func (apui AskPassUI) Confirm(msg string) bool {
-	cmd := exec.Command("ssh-askpass", msg)
+func (aui *AskPassUI) Confirm(msg string) bool {
+	cmd := exec.Command(aui.askPass, msg)
 	out, err := cmd.Output()
 	if err != nil {
 		return false

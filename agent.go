@@ -37,7 +37,7 @@ func NewGuardian(policyConfigPath string, inType InputType) (*Agent, error) {
 		ui = &FancyTerminalUI{}
 		break
 	case Display:
-		ui = &AskPassUI{}
+		ui = NewAskPassUI()
 	}
 
 	// get policy store
